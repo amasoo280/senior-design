@@ -1,34 +1,126 @@
-# Asset Query Dashboard
+# Senior Design Project - NL→SQL Query System
 
-A modern React-based dashboard for querying asset and equipment data using natural language. Built with TypeScript, Tailwind CSS, and Vite.
+A full-stack application for converting natural language queries to SQL using AWS Bedrock, with a React frontend and FastAPI backend.
+
+## Project Structure
+
+```
+.
+├── backend/              # FastAPI backend server
+│   ├── app/             # Application modules
+│   │   ├── bedrock/     # AWS Bedrock client for NL→SQL
+│   │   ├── safety/      # SQL safety guardrails
+│   │   ├── schema/      # Database schema context
+│   │   └── executor/    # SQL executor (to be implemented)
+│   ├── main.py          # FastAPI application entry point
+│   ├── requirements.txt # Python dependencies
+│   └── README.md        # Backend documentation
+│
+├── frontend/            # React + TypeScript frontend
+│   ├── src/            # Source code
+│   │   ├── components/ # React components
+│   │   ├── App.tsx     # Root component
+│   │   └── main.tsx    # Application entry point
+│   ├── index.html      # HTML template
+│   ├── package.json    # Node.js dependencies
+│   ├── vite.config.ts  # Vite configuration
+│   ├── tailwind.config.js  # Tailwind CSS configuration
+│   └── tsconfig.json   # TypeScript configuration
+│
+├── .vscode/            # VS Code settings (optional)
+├── .gitignore          # Git ignore rules
+└── README.md           # This file
+```
 
 ## Features
 
-- **Natural Language Queries**: Ask questions about equipment, locations, status, and deployment duration
+### Backend
+- **NL→SQL Generation**: Converts natural language to SQL using AWS Bedrock (Claude 3 Sonnet)
+- **Tenant Isolation**: Enforces multi-tenant security with automatic tenant_id filtering
+- **SQL Safety**: Validates queries to prevent dangerous operations and SQL injection
+- **Schema Context**: Provides database schema information for accurate SQL generation
+
+### Frontend
+- **Natural Language Interface**: User-friendly query input with autocomplete suggestions
 - **Real-time Results**: Interactive query results with equipment cards and status indicators
-- **Query History**: Keep track of recent queries for easy reference
-- **Sample Queries**: Pre-built example queries to get started quickly
+- **Query History**: Tracks recent queries for easy reference
 - **Responsive Design**: Modern UI that works on desktop and mobile devices
-- **Mock Data**: Includes sample data for frontend testing and development
 
 ## Tech Stack
 
+### Backend
+- **FastAPI** - Modern Python web framework
+- **AWS Bedrock** - Generative AI for NL→SQL conversion
+- **boto3** - AWS SDK for Python
+- **Pydantic** - Data validation
+
+### Frontend
 - **React 18** with TypeScript
-- **Tailwind CSS** for styling
-- **Lucide React** for icons
-- **Vite** for build tooling and development server
-- **ESLint** for code linting
+- **Tailwind CSS** - Utility-first CSS framework
+- **Vite** - Fast build tool and dev server
+- **Lucide React** - Icon library
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js (version 16 or higher)
-- npm or yarn
+- **Node.js** (version 16 or higher) - for frontend
+- **Python** (version 3.9 or higher) - for backend
+- **npm** or **yarn** - for frontend dependencies
+- **AWS Account** with Bedrock access - for NL→SQL generation
 
-### Installation
+### Backend Setup
 
-1. Clone or download this project
+1. Navigate to the backend directory:
+   ```bash
+   cd backend
+   ```
+
+2. Create a virtual environment (recommended):
+   ```bash
+   python -m venv venv
+   
+   # Windows
+   venv\Scripts\activate
+   
+   # macOS/Linux
+   source venv/bin/activate
+   ```
+
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Configure AWS credentials:
+   ```bash
+   # Option 1: Environment variables
+   export AWS_ACCESS_KEY_ID=your_access_key
+   export AWS_SECRET_ACCESS_KEY=your_secret_key
+   export AWS_REGION=us-east-1
+   
+   # Option 2: AWS credentials file (~/.aws/credentials)
+   ```
+
+5. Start the backend server:
+   ```bash
+   uvicorn main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+The backend API will be available at:
+- **API**: `http://localhost:8000`
+- **Docs**: `http://localhost:8000/docs` (Swagger UI)
+- **Health**: `http://localhost:8000/health`
+
+For detailed backend documentation, see [backend/README.md](backend/README.md).
+
+### Frontend Setup
+
+1. Navigate to the frontend directory:
+   ```bash
+   cd frontend
+   ```
+
 2. Install dependencies:
    ```bash
    npm install
@@ -39,87 +131,96 @@ A modern React-based dashboard for querying asset and equipment data using natur
    npm run dev
    ```
 
-4. Open your browser and navigate to `http://localhost:5173`
+The frontend will be available at `http://localhost:5173`
 
-### Available Scripts
+### Available Scripts (Frontend)
 
 - `npm run dev` - Start development server
 - `npm run build` - Build for production
 - `npm run preview` - Preview production build
 - `npm run lint` - Run ESLint
 
-## Project Structure
+## Development Workflow
 
-```
-src/
-├── components/
-│   └── Dashboard.tsx    # Main dashboard component
-├── App.tsx              # Root app component
-├── main.tsx            # Application entry point
-└── index.css           # Global styles with Tailwind imports
-```
+### Running Both Servers
 
-## Features Overview
+1. **Terminal 1 - Backend**:
+   ```bash
+   cd backend
+   uvicorn main:app --reload
+   ```
 
-### Query Interface
-- Text area for natural language queries
-- Enter key to submit queries
-- Loading states with spinner animation
-- Disabled state when query is empty
+2. **Terminal 2 - Frontend**:
+   ```bash
+   cd frontend
+   npm run dev
+   ```
 
-### Results Display
-- Equipment cards with detailed information
-- Status indicators (Active, Maintenance, etc.)
-- Location and deployment duration data
-- Query summary and timestamp
+### API Integration
 
-### Sidebar Components
-- **Quick Stats**: Overview of equipment counts and status
-- **Sample Queries**: Clickable example queries
-- **Recent Queries**: History of previous searches
+The frontend is configured to call the backend `/ask` endpoint. Ensure the backend is running on port 8000 before using the frontend.
 
-## Customization
+**API Endpoint**: `POST http://localhost:8000/ask`
 
-### Adding New Equipment Data
-Edit the mock data in `src/components/Dashboard.tsx` around line 35-45:
-
-```typescript
-const mockData = {
-  query: query,
-  timestamp: new Date().toISOString(),
-  data: [
-    // Add your equipment objects here
-  ],
-  summary: `Found X pieces of equipment matching your query.`
-};
+**Request Body**:
+```json
+{
+  "query": "What equipment is active at Site A?",
+  "tenant_id": "tenant-123"
+}
 ```
 
-### Styling
-The project uses Tailwind CSS. You can customize the design by:
-- Modifying Tailwind classes in components
-- Updating the color scheme in `tailwind.config.js`
-- Adding custom CSS in `src/index.css`
+## Project Status
 
-### Backend Integration
-To connect to a real backend:
+✅ **Completed**:
+- Backend module structure
+- Bedrock client for NL→SQL generation
+- SQL safety guardrails
+- Schema context module
+- `/ask` API endpoint
+- Frontend UI components
 
-1. Replace the mock data section in `executeQuery()` function
-2. Uncomment and modify the fetch API call
-3. Update the data structure to match your backend response
+🔄 **In Progress**:
+- RDS executor module
+- Frontend-backend integration
 
-## Development Notes
+📋 **Planned**:
+- Database connection and query execution
+- Authentication and authorization
+- Rate limiting and caching
+- Monitoring and logging
 
-- The dashboard currently uses mock data for demonstration
-- All queries return the same sample equipment data
-- The loading animation simulates a 1.5-second API call
-- Query history is stored in component state (not persisted)
+For detailed roadmap, see [backend/ROADMAP.md](backend/ROADMAP.md).
 
-## Browser Support
+## Environment Variables
 
-- Chrome (latest)
-- Firefox (latest)
-- Safari (latest)
-- Edge (latest)
+### Backend
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `AWS_ACCESS_KEY_ID` | AWS access key | Required |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key | Required |
+| `AWS_REGION` | AWS region | `us-east-1` |
+| `BEDROCK_MODEL_ID` | Bedrock model ID | `anthropic.claude-3-sonnet-20240229-v1:0` |
+| `DEFAULT_TENANT_ID` | Default tenant ID | `default` |
+
+### Frontend
+
+Frontend environment variables can be configured in `.env` files:
+- `.env` - Default environment variables
+- `.env.local` - Local overrides (gitignored)
+
+Example:
+```env
+VITE_API_URL=http://localhost:8000
+```
+
+## Contributing
+
+1. Create a feature branch from `main`
+2. Make your changes
+3. Test thoroughly
+4. Submit a pull request
 
 ## License
 

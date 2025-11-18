@@ -1,0 +1,14 @@
+# FastAPI and server dependencies
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+
+# AWS SDK
+boto3>=1.29.0
+botocore>=1.32.0
+
+# Optional: for enhanced validation
+python-multipart>=0.0.6
+
+
+

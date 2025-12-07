@@ -1,75 +1,100 @@
-import React, { useState } from 'react';
-import { Search, Send, Loader2, MapPin, Package, Clock, Activity } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Send, Loader2, User, Code, AlertCircle, CheckCircle2, LogIn, UserCircle } from 'lucide-react';
+import { API_ENDPOINTS, DEFAULT_TENANT_ID } from '../config';
 
-// TODO: Move to config file
-const EXAMPLE_QUERIES = [
-  "What equipment is active at Site A?",
-  "Show me all equipment deployed to Job X",
-  "Which assets have been operating for more than 30 days?",
-  "List equipment by location",
-  "What is the status of equipment ID 12345?"
-];
-
-interface Equipment {
+interface Message {
   id: string;
-  name: string;
-  location: string;
-  status: string;
-  daysActive: number;
-}
-
-interface QueryResult {
-  query: string;
+  role: 'user' | 'assistant';
+  content: string;
   timestamp: string;
-  data: Equipment[];
-  summary: string;
-}
-
-interface HistoryItem {
-  query: string;
-  timestamp: string;
+  sql?: string;
+  explanation?: string;
+  data?: any[];
+  rowCount?: number;
+  error?: string;
+  executionError?: string;
 }
 
 const Dashboard: React.FC = () => {
-  const [query, setQuery] = useState<string>('');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [queryResults, setQueryResults] = useState<QueryResult | null>(null);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const executeQuery = async () => {
-    if (!query.trim()) return;
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!input.trim() || isLoading) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: input.trim(),
+      timestamp: new Date().toISOString(),
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
     setIsLoading(true);
-    
-    // API integration placeholder
-    // TODO: Replace with backend endpoint
+
     try {
-      // const res = await fetch('/api/query', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ query })
-      // });
-      // const data = await res.json();
-      
-      // Temporary mock data for frontend testing
-      setTimeout(() => {
-        const mockData = {
-          query: query,
-          timestamp: new Date().toISOString(),
-          data: [
-            { id: 'EQ-001', name: 'Excavator A', location: 'Site A', status: 'Active', daysActive: 15 },
-            { id: 'EQ-002', name: 'Crane B', location: 'Site A', status: 'Active', daysActive: 22 },
-            { id: 'EQ-003', name: 'Loader C', location: 'Site B', status: 'Maintenance', daysActive: 0 }
-          ],
-          summary: `Found 3 pieces of equipment matching your query.`
-        };
-        
-        setQueryResults(mockData);
-        setHistory(prev => [{ query, timestamp: new Date().toISOString() }, ...prev.slice(0, 9)]);
-        setIsLoading(false);
-      }, 1500);
+      const response = await fetch(API_ENDPOINTS.ask, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Tenant-ID': DEFAULT_TENANT_ID,
+        },
+        body: JSON.stringify({
+          query: userMessage.content,
+          tenant_id: DEFAULT_TENANT_ID,
+          execute: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: data.execution_error
+          ? `I generated the SQL query, but there was an error executing it: ${data.execution_error}`
+          : data.row_count === 0
+          ? 'The query executed successfully but returned no results.'
+          : `I found ${data.row_count} result${data.row_count === 1 ? '' : 's'}.`,
+        timestamp: new Date().toISOString(),
+        sql: data.sql,
+        explanation: data.explanation,
+        data: data.rows || [],
+        rowCount: data.row_count || 0,
+        error: data.execution_error,
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
     } catch (err) {
-      console.error('Query failed:', err);
+      const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
+      const errorResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: `I encountered an error: ${errorMessage}`,
+        timestamp: new Date().toISOString(),
+        error: errorMessage,
+      };
+      setMessages(prev => [...prev, errorResponse]);
+    } finally {
       setIsLoading(false);
     }
   };
@@ -77,184 +102,218 @@ const Dashboard: React.FC = () => {
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      executeQuery();
+      handleSubmit();
     }
   };
 
+  const formatDataTable = (data: any[]) => {
+    if (data.length === 0) return null;
+
+    const columns = Object.keys(data[0]);
+    return (
+      <div className="overflow-x-auto mt-3">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-slate-700">
+              {columns.map((col) => (
+                <th key={col} className="text-left py-2 px-3 text-slate-400 font-semibold">
+                  {col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.slice(0, 10).map((row, idx) => (
+              <tr key={idx} className="border-b border-slate-800 hover:bg-slate-800/50">
+                {columns.map((col) => (
+                  <td key={col} className="py-2 px-3 text-slate-300">
+                    {row[col] === null || row[col] === undefined ? (
+                      <span className="text-slate-500">—</span>
+                    ) : typeof row[col] === 'object' ? (
+                      <pre className="text-xs">{JSON.stringify(row[col], null, 2)}</pre>
+                    ) : (
+                      String(row[col])
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {data.length > 10 && (
+          <p className="text-xs text-slate-500 mt-2 px-3">
+            Showing 10 of {data.length} results
+          </p>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* Top nav bar */}
-      <div className="bg-slate-800/50 border-b border-slate-700 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-white">Asset Query Dashboard</h1>
-              <p className="text-slate-400 text-sm mt-1">Natural language database querying powered by AI</p>
+    <div className="flex flex-col h-screen bg-[#0f0f23] text-white">
+      {/* Top Bar */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-[#0f0f23]">
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-semibold text-white">Sargon AI</h1>
+        </div>
+        <div className="relative">
+          <button
+            onClick={() => setShowProfileMenu(!showProfileMenu)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+          >
+            <UserCircle className="w-5 h-5 text-slate-400" />
+            <span className="text-sm text-slate-300">Profile</span>
+          </button>
+          {showProfileMenu && (
+            <div className="absolute right-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-lg py-1 z-10">
+              <button className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2">
+                <LogIn className="w-4 h-4" />
+                Login
+              </button>
+              <button className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2">
+                <UserCircle className="w-4 h-4" />
+                Account Settings
+              </button>
             </div>
-            <div className="flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-lg">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-green-500 text-sm font-medium">System Online</span>
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main content area */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Query input section */}
-            <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 shadow-xl">
-              <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <Search className="w-5 h-5 text-blue-400" />
-                Ask a Question
-              </h2>
-              
-              <div className="space-y-4">
-                <textarea
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={handleKeyPress}
-                  placeholder="Ask about equipment, locations, status, deployment duration..."
-                  className="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                  rows="3"
-                />
-                
-                <button
-                  onClick={executeQuery}
-                  disabled={isLoading || !query.trim()}
-                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-medium py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      Processing Query...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-5 h-5" />
-                      Submit Query
-                    </>
-                  )}
-                </button>
-              </div>
+      {/* Messages Area */}
+      <div className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="max-w-3xl mx-auto space-y-6">
+          {messages.length === 0 && (
+            <div className="text-center py-12">
+              <h2 className="text-2xl font-semibold text-slate-300 mb-2">Welcome to Sargon AI</h2>
+              <p className="text-slate-500">Ask me anything about your database</p>
             </div>
+          )}
 
-            {/* Results section */}
-            {queryResults && (
-              <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 shadow-xl">
-                <div className="flex items-start justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-white">Query Results</h2>
-                  <span className="text-xs text-slate-400">
-                    {new Date(queryResults.timestamp).toLocaleString()}
-                  </span>
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex gap-4 ${
+                message.role === 'user' ? 'justify-end' : 'justify-start'
+              }`}
+            >
+              {message.role === 'assistant' && (
+                <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center flex-shrink-0">
+                  <span className="text-xs">AI</span>
                 </div>
-                
-                <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                  <p className="text-blue-300 text-sm font-medium">{queryResults.summary}</p>
-                </div>
+              )}
 
-                {/* Equipment cards */}
-                <div className="space-y-3">
-                  {queryResults.data.map((equipment, index) => (
-                    <div
-                      key={index}
-                      className="bg-slate-900/50 border border-slate-600 rounded-lg p-4 hover:border-slate-500 transition-colors"
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <Package className="w-5 h-5 text-blue-400" />
-                            <h3 className="text-white font-semibold">{equipment.name}</h3>
-                            <span className="text-xs text-slate-400">({equipment.id})</span>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-3 mt-3">
-                            <div className="flex items-center gap-2 text-sm">
-                              <MapPin className="w-4 h-4 text-slate-400" />
-                              <span className="text-slate-300">{equipment.location}</span>
-                            </div>
-                            
-                            <div className="flex items-center gap-2 text-sm">
-                              <Clock className="w-4 h-4 text-slate-400" />
-                              <span className="text-slate-300">{equipment.daysActive} days active</span>
-                            </div>
-                          </div>
-                        </div>
-                        
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          equipment.status === 'Active' 
-                            ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                            : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-                        }`}>
-                          {equipment.status}
-                        </span>
+              <div
+                className={`max-w-[85%] rounded-2xl px-4 py-3 ${
+                  message.role === 'user'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-800 text-slate-200'
+                }`}
+              >
+                {message.role === 'user' ? (
+                  <p className="whitespace-pre-wrap">{message.content}</p>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="whitespace-pre-wrap">{message.content}</p>
+
+                    {message.error && (
+                      <div className="flex items-start gap-2 p-2 bg-red-500/10 border border-red-500/20 rounded-lg">
+                        <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                        <p className="text-sm text-red-300">{message.error}</p>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+                    )}
 
-          {/* Sidebar */}
-          <div className="space-y-6">
-            {/* Stats widget */}
-            <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 shadow-xl">
-              <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <Activity className="w-5 h-5 text-purple-400" />
-                Quick Stats
-              </h3>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-400 text-sm">Total Equipment</span>
-                  <span className="text-white font-semibold">247</span>
+                    {message.sql && (
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-sm text-slate-400 hover:text-slate-300 flex items-center gap-2">
+                          <Code className="w-4 h-4" />
+                          Show SQL
+                        </summary>
+                        <div className="mt-2 p-3 bg-slate-900/50 rounded-lg border border-slate-700">
+                          <pre className="text-xs text-green-400 font-mono overflow-x-auto">
+                            {message.sql}
+                          </pre>
+                          {message.explanation && (
+                            <p className="text-xs text-slate-400 mt-2">{message.explanation}</p>
+                          )}
+                        </div>
+                      </details>
+                    )}
+
+                    {message.data && message.data.length > 0 && (
+                      <div className="mt-3">
+                        {formatDataTable(message.data)}
+                      </div>
+                    )}
+
+                    {message.executionError && (
+                      <div className="flex items-start gap-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                        <AlertCircle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                        <p className="text-sm text-yellow-300">
+                          Execution error: {message.executionError}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {message.role === 'user' && (
+                <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0">
+                  <User className="w-4 h-4 text-white" />
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-400 text-sm">Active Deployments</span>
-                  <span className="text-green-400 font-semibold">189</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-400 text-sm">Under Maintenance</span>
-                  <span className="text-yellow-400 font-semibold">23</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-400 text-sm">Available</span>
-                  <span className="text-blue-400 font-semibold">35</span>
-                </div>
+              )}
+            </div>
+          ))}
+
+          {isLoading && (
+            <div className="flex gap-4 justify-start">
+              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center flex-shrink-0">
+                <span className="text-xs">AI</span>
+              </div>
+              <div className="bg-slate-800 rounded-2xl px-4 py-3">
+                <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
               </div>
             </div>
+          )}
 
-            {/* Example queries */}
-            <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 shadow-xl">
-              <h3 className="text-lg font-semibold text-white mb-4">Sample Queries</h3>
-              <div className="space-y-2">
-                {EXAMPLE_QUERIES.map((example, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setQuery(example)}
-                    className="w-full text-left px-3 py-2 bg-slate-900/50 hover:bg-slate-700/50 border border-slate-600 hover:border-slate-500 rounded-lg text-sm text-slate-300 hover:text-white transition-colors"
-                  >
-                    {example}
-                  </button>
-                ))}
-              </div>
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      {/* Input Area */}
+      <div className="border-t border-slate-800 bg-[#0f0f23] px-4 py-4">
+        <div className="max-w-3xl mx-auto">
+          <form onSubmit={handleSubmit} className="flex items-end gap-3">
+            <div className="flex-1 relative">
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  e.target.style.height = 'auto';
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+                }}
+                onKeyDown={handleKeyPress}
+                placeholder="Ask me anything about your database..."
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 pr-12 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none max-h-[200px]"
+                rows={1}
+              />
             </div>
-
-            {/* Query history */}
-            {history.length > 0 && (
-              <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 shadow-xl">
-                <h3 className="text-lg font-semibold text-white mb-4">Recent Queries</h3>
-                <div className="space-y-2">
-                  {history.map((item, i) => (
-                    <div key={i} className="text-sm text-slate-400 border-l-2 border-slate-600 pl-3 py-1">
-                      {item.query}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+            <button
+              type="submit"
+              disabled={!input.trim() || isLoading}
+              className="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+            >
+              {isLoading ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Send className="w-5 h-5" />
+              )}
+            </button>
+          </form>
+          <p className="text-xs text-slate-500 mt-2 text-center">
+            Press Enter to send, Shift+Enter for new line
+          </p>
         </div>
       </div>
     </div>

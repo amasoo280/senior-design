@@ -84,6 +84,10 @@ class SchemaContext:
     def _get_default_schema(self) -> Dict:
         """
         Get default sample schema for equipment/asset management.
+        
+        TODO: Update this with the actual Sargon Partners database schema.
+        Replace the tables, columns, and relationships below with the real schema
+        from your database. You can use update_schema() method or modify this method.
 
         Returns:
             Dictionary with schema information

@@ -1,4 +1,9 @@
-from pydantic import BaseSettings, Field
+from pydantic import Field
+try:
+    from pydantic_settings import BaseSettings
+except ImportError:
+    # Fallback for older pydantic versions
+    from pydantic import BaseSettings
 
 class Settings(BaseSettings):
     db_host: str = Field(..., env="DB_HOST")

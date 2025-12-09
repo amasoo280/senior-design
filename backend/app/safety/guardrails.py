@@ -89,23 +89,26 @@ class SQLGuardrails:
             Tuple of (has_isolation, error_message)
         """
         sql_upper = sql.upper()
-
-        # Check for tenant_id in WHERE clause
-        # Look for patterns like: WHERE ... tenant_id = ...
-        where_pattern = r"WHERE\s+.*?tenant_id\s*=\s*"
         
-        # Also check for parameterized queries: WHERE tenant_id = :tenant_id or $1, etc.
+        # Sargon Partners uses 'accountId' as the tenant column
+        tenant_column = "accountId"
+
+        # Check for accountId in WHERE clause
+        # Look for patterns like: WHERE ... accountId = ...
+        where_pattern = rf"WHERE\s+.*?{tenant_column}\s*=\s*"
+        
+        # Also check for parameterized queries: WHERE accountId = :accountId or $1, etc.
         tenant_patterns = [
-            rf"tenant_id\s*=\s*['\"]{re.escape(self.tenant_id)}['\"]",  # Literal value
-            r"tenant_id\s*=\s*:tenant_id",  # Named parameter
-            r"tenant_id\s*=\s*\$\d+",  # Positional parameter (PostgreSQL)
-            r"tenant_id\s*=\s*\?",  # Positional parameter (general)
-            r"tenant_id\s*=\s*%s",  # Python-style parameter
+            rf"{tenant_column}\s*=\s*['\"]{re.escape(self.tenant_id)}['\"]",  # Literal value
+            rf"{tenant_column}\s*=\s*:{tenant_column}",  # Named parameter
+            rf"{tenant_column}\s*=\s*\$\d+",  # Positional parameter (PostgreSQL)
+            rf"{tenant_column}\s*=\s*\?",  # Positional parameter (general)
+            rf"{tenant_column}\s*=\s*%s",  # Python-style parameter
         ]
 
         # Check if WHERE clause exists
         if "WHERE" not in sql_upper:
-            return False, "Query must include a WHERE clause with tenant_id filter"
+            return False, f"Query must include a WHERE clause with {tenant_column} filter"
 
         # Check if any tenant isolation pattern matches
         has_tenant_filter = False
@@ -114,14 +117,16 @@ class SQLGuardrails:
                 has_tenant_filter = True
                 break
 
-        # Also check if literal tenant_id value is present
+        # Also check if literal accountId value is present
         if f"'{self.tenant_id}'" in sql or f'"{self.tenant_id}"' in sql:
-            has_tenant_filter = True
+            # Check if it's near accountId
+            if re.search(rf"{tenant_column}.*?['\"]{re.escape(self.tenant_id)}['\"]", sql, re.IGNORECASE):
+                has_tenant_filter = True
 
         if not has_tenant_filter:
             return (
                 False,
-                f"Query must include tenant isolation: WHERE tenant_id = '{self.tenant_id}'",
+                f"Query must include tenant isolation: WHERE {tenant_column} = '{self.tenant_id}'",
             )
 
         return True, None
@@ -140,11 +145,12 @@ class SQLGuardrails:
             SQL query with enforced tenant isolation
         """
         sql_upper = sql.upper()
+        tenant_column = "accountId"
         
-        # If tenant_id filter already exists, return as-is
+        # If accountId filter already exists, return as-is
         tenant_patterns = [
-            rf"tenant_id\s*=\s*['\"]{re.escape(self.tenant_id)}['\"]",
-            r"tenant_id\s*=\s*:tenant_id",
+            rf"{tenant_column}\s*=\s*['\"]{re.escape(self.tenant_id)}['\"]",
+            rf"{tenant_column}\s*=\s*:{tenant_column}",
         ]
         
         for pattern in tenant_patterns:
@@ -153,14 +159,14 @@ class SQLGuardrails:
 
         # Add tenant isolation to WHERE clause
         if "WHERE" in sql_upper:
-            # Find WHERE clause and add tenant_id filter
+            # Find WHERE clause and add accountId filter
             where_match = re.search(r"\bWHERE\b", sql_upper, re.IGNORECASE)
             if where_match:
                 where_pos = where_match.end()
-                # Insert tenant_id filter
+                # Insert accountId filter
                 sql = (
                     sql[:where_pos]
-                    + f" tenant_id = '{self.tenant_id}' AND"
+                    + f" {tenant_column} = '{self.tenant_id}' AND"
                     + sql[where_pos:]
                 )
         else:
@@ -170,9 +176,9 @@ class SQLGuardrails:
             )
             if order_match:
                 order_pos = order_match.start()
-                sql = sql[:order_pos] + f" WHERE tenant_id = '{self.tenant_id}' " + sql[order_pos:]
+                sql = sql[:order_pos] + f" WHERE {tenant_column} = '{self.tenant_id}' " + sql[order_pos:]
             else:
-                sql = sql.rstrip().rstrip(";") + f" WHERE tenant_id = '{self.tenant_id}'"
+                sql = sql.rstrip().rstrip(";") + f" WHERE {tenant_column} = '{self.tenant_id}'"
 
         return sql
 

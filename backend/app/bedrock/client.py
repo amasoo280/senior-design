@@ -144,11 +144,12 @@ class BedrockClient:
 
 CRITICAL REQUIREMENTS:
 1. Generate ONLY valid SQL SELECT queries (no INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE)
-2. ALL queries MUST include tenant isolation: WHERE tenant_id = '{tenant_id}'
-3. Use parameterized queries or ensure tenant_id is properly quoted
-4. Do not generate queries that could modify or delete data
-5. Ensure SQL is safe from SQL injection attacks
-6. Return only the SQL query in a code block labeled "SQL", followed by a brief explanation
+2. ALL queries MUST include tenant isolation: WHERE accountId = '{tenant_id}'
+3. The tenant column is 'accountId', NOT 'tenant_id'
+4. Use parameterized queries or ensure accountId is properly quoted
+5. Do not generate queries that could modify or delete data
+6. Ensure SQL is safe from SQL injection attacks
+7. Return only the SQL query in a code block labeled "SQL", followed by a brief explanation
 
 DATABASE SCHEMA:
 {schema_context}
@@ -158,9 +159,10 @@ USER QUESTION:
 
 Generate a safe SQL SELECT query that:
 - Answers the user's question
-- Includes tenant isolation with tenant_id = '{tenant_id}'
+- Includes tenant isolation with accountId = '{tenant_id}'
 - Uses proper SQL syntax
 - Is optimized for performance
+- Respects table name casing (some tables are uppercase like JOBINSTANCE, TAG, etc.)
 
 Return your response in this exact format:
 

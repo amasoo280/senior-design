@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader2, User, Code, AlertCircle, CheckCircle2, LogIn, UserCircle } from 'lucide-react';
+import { Send, Loader2, User, Code, AlertCircle, LogIn, UserCircle } from 'lucide-react';
 import { API_ENDPOINTS, DEFAULT_TENANT_ID } from '../config';
 
 interface Message {
@@ -46,6 +46,20 @@ const Dashboard: React.FC = () => {
     setInput('');
     setIsLoading(true);
 
+    // Validate tenant ID is set
+    if (!DEFAULT_TENANT_ID) {
+      const errorResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: 'Error: Tenant ID is not configured. Please set VITE_DEFAULT_TENANT_ID in your .env file.',
+        timestamp: new Date().toISOString(),
+        error: 'Missing tenant ID configuration',
+      };
+      setMessages(prev => [...prev, errorResponse]);
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch(API_ENDPOINTS.ask, {
         method: 'POST',
@@ -67,19 +81,35 @@ const Dashboard: React.FC = () => {
 
       const data = await response.json();
 
+      // Determine response type: SQL mode (has row_count) vs chat/clarification mode
+      const isSqlMode = data.row_count !== null && data.row_count !== undefined;
+      const hasSql = data.sql && data.sql.trim() !== '';
+
+      // Build appropriate message content based on response type
+      let messageContent: string;
+      if (data.execution_error) {
+        messageContent = `I generated the SQL query, but there was an error executing it: ${data.execution_error}`;
+      } else if (isSqlMode) {
+        // SQL mode response
+        if (data.row_count === 0) {
+          messageContent = 'The query executed successfully but returned no results.';
+        } else {
+          messageContent = `I found ${data.row_count} result${data.row_count === 1 ? '' : 's'}.`;
+        }
+      } else {
+        // Chat or clarification mode - use explanation or a default message
+        messageContent = data.explanation || 'I received your message.';
+      }
+
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: data.execution_error
-          ? `I generated the SQL query, but there was an error executing it: ${data.execution_error}`
-          : data.row_count === 0
-          ? 'The query executed successfully but returned no results.'
-          : `I found ${data.row_count} result${data.row_count === 1 ? '' : 's'}.`,
+        content: messageContent,
         timestamp: new Date().toISOString(),
-        sql: data.sql,
+        sql: hasSql ? data.sql : undefined,
         explanation: data.explanation,
         data: data.rows || [],
-        rowCount: data.row_count || 0,
+        rowCount: data.row_count ?? 0,
         error: data.execution_error,
       };
 

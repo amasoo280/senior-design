@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Optional
+from typing import Optional, List, Any
 
 from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from botocore.exceptions import ClientError
 
 from app.bedrock.client import BedrockClient
+from app.config import settings
 from app.executor.executor import execute_query, DatabaseExecutionError
 from app.safety.guardrails import SQLGuardrails
 from app.schema.context import SchemaContext
@@ -47,11 +48,11 @@ class AskRequest(BaseModel):
 
 class AskResponse(BaseModel):
     sql: str
-    explanation: str
+    explanation: Optional[str] = None
     natural_language_query: str
     tenant_id: str
     validated: bool
-    rows: Optional[list] = None
+    rows: Optional[List[Any]] = None
     row_count: Optional[int] = None
     execution_error: Optional[str] = None
 
@@ -88,47 +89,97 @@ async def ask(
 ):
     """
     Convert natural language query to SQL and optionally execute it.
-    
-    - **query**: Natural language question
-    - **tenant_id**: Tenant ID (can also be provided via X-Tenant-ID header)
-    - **execute**: If true, execute the generated SQL and return results
     """
-    # Determine tenant_id
-    tenant_id = request.tenant_id or x_tenant_id or os.getenv("DEFAULT_TENANT_ID", "default")
+    # Determine tenant_id from request body, header, or env (NO literal "default" fallback)
+    tenant_id = request.tenant_id or x_tenant_id or settings.default_tenant_id
     
+    if not tenant_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing tenant_id (accountId). Provide it in request body, X-Tenant-ID header, or set DEFAULT_TENANT_ID in .env"
+        )
+    
+    # Reject literal "default" string
+    if tenant_id == "default":
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid tenant_id: 'default' is not allowed. Provide a valid tenant ID."
+        )
+
     logger.info(f"Processing query for tenant {tenant_id}: {request.query[:100]}...")
-    
+
     try:
         # Get schema context
         schema_context_str = schema_context.get_schema_context()
-        
-        # Generate SQL using Bedrock
-        logger.info("Calling Bedrock to generate SQL...")
+
+        # Generate response using Bedrock
+        logger.info("Calling Bedrock to generate response...")
         bedrock_result = bedrock_client.generate_sql(
             natural_language_query=request.query,
             schema_context=schema_context_str,
             tenant_id=tenant_id
         )
-        
-        generated_sql = bedrock_result["sql"]
-        explanation = bedrock_result.get("explanation", "Generated SQL query from natural language.")
-        
+
+        # Extract response components
+        mode = bedrock_result.get("mode", "sql")
+        response_text = bedrock_result.get("response")
+        generated_sql = bedrock_result.get("sql")
+        explanation = bedrock_result.get(
+            "explanation",
+            "Generated response from natural language."
+        )
+
+        # Handle non-SQL modes (chat or clarification)
+        if mode in ("chat", "clarification"):
+            logger.info(f"Bedrock returned {mode} mode - skipping SQL validation and execution")
+            return AskResponse(
+                sql="",
+                explanation=explanation or response_text or "Chat response",
+                natural_language_query=request.query,
+                tenant_id=tenant_id,
+                validated=False,
+                rows=None,
+                row_count=None,
+                execution_error=None
+            )
+
+        # Only proceed with SQL validation/execution when mode == "sql"
+        if mode != "sql":
+            logger.warning(f"Unexpected mode '{mode}' - treating as non-SQL")
+            return AskResponse(
+                sql="",
+                explanation=explanation or "Unexpected response mode",
+                natural_language_query=request.query,
+                tenant_id=tenant_id,
+                validated=False,
+                rows=None,
+                row_count=None,
+                execution_error=None
+            )
+
+        # Mode is "sql" - validate that SQL was generated
+        if not generated_sql:
+            logger.error("Mode is 'sql' but no SQL was generated")
+            raise HTTPException(
+                status_code=500,
+                detail="Bedrock returned SQL mode but no SQL query was generated"
+            )
+
         logger.info(f"Generated SQL: {generated_sql[:200]}...")
-        
-        # Validate SQL with guardrails
+
+        # Initialize guardrails only for SQL mode
         guardrails = SQLGuardrails(tenant_id)
+
+        # Validate SQL
         is_valid, error_message = guardrails.validate_query(generated_sql)
-        
         if not is_valid:
             logger.warning(f"SQL validation failed: {error_message}")
             raise HTTPException(
                 status_code=400,
                 detail=f"SQL validation failed: {error_message}"
             )
-        
-        logger.info("SQL validation passed")
-        
-        # Prepare response
+
+        # Base response for SQL mode
         response_data = {
             "sql": generated_sql,
             "explanation": explanation,
@@ -139,36 +190,36 @@ async def ask(
             "row_count": None,
             "execution_error": None
         }
-        
-        # Execute query if requested
+
+        # Execute query if requested (only for SQL mode)
         if request.execute:
             logger.info("Executing SQL query...")
             try:
                 rows = execute_query(generated_sql)
                 response_data["rows"] = rows
                 response_data["row_count"] = len(rows)
-                logger.info(f"Query executed successfully, returned {len(rows)} rows")
             except DatabaseExecutionError as db_exc:
                 error_msg = str(db_exc)
                 logger.error(f"Database execution error: {error_msg}")
                 response_data["execution_error"] = error_msg
-                # Don't fail the request, just include the error in response
-        
+
         return AskResponse(**response_data)
-        
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "Unknown")
-        error_message = e.response.get("Error", {}).get("Message", str(e))
+
+    except ClientError as aws_exc:
+        error_code = aws_exc.response["Error"]["Code"]
+        error_message = aws_exc.response["Error"]["Message"]
         logger.error(f"Bedrock API error ({error_code}): {error_message}")
         raise HTTPException(
             status_code=503,
-            detail=f"AWS Bedrock service error ({error_code}): {error_message}"
+            detail=f"AWS Bedrock error ({error_code})"
         )
+
     except HTTPException:
         raise
+
     except Exception as e:
         logger.exception(f"Unexpected error processing query: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Internal server error: {str(e)}"
+            detail="Internal server error"
         )

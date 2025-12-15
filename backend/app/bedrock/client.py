@@ -1,45 +1,48 @@
-"""AWS Bedrock client for generating SQL queries from natural language."""
+"""
+AWS Bedrock client for generating chatbot responses and SQL queries
+from natural language input.
+"""
 
 import json
-import os
-from typing import Optional
-
 import boto3
 from botocore.exceptions import ClientError
 
+from app.config import settings
+
 
 class BedrockClient:
-    """Client for interacting with AWS Bedrock to generate SQL queries."""
+    """Client for interacting with AWS Bedrock."""
 
-    def __init__(
-        self,
-        model_id: Optional[str] = None,
-        region_name: Optional[str] = None,
-        aws_access_key_id: Optional[str] = None,
-        aws_secret_access_key: Optional[str] = None,
-    ):
-        """
-        Initialize Bedrock client.
+    def __init__(self):
+        # Validate required settings
+        if not settings.aws_access_key_id or not settings.aws_secret_access_key:
+            raise ValueError(
+                "AWS credentials missing. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env"
+            )
 
-        Args:
-            model_id: Bedrock model ID (default: anthropic.claude-3-sonnet-20240229-v1:0)
-            region_name: AWS region (default: us-east-1)
-            aws_access_key_id: AWS access key (from env if not provided)
-            aws_secret_access_key: AWS secret key (from env if not provided)
-        """
-        self.model_id = model_id or os.getenv(
-            "BEDROCK_MODEL_ID", "anthropic.claude-3-sonnet-20240229-v1:0"
-        )
-        self.region_name = region_name or os.getenv("AWS_REGION", "us-east-1")
+        if not settings.aws_region:
+            raise ValueError("AWS_REGION is missing in .env")
 
-        # Initialize Bedrock runtime client
+        if not settings.bedrock_model_id:
+            raise ValueError(
+                "BEDROCK_MODEL_ID is missing in .env. "
+                "Example: us.anthropic.claude-3-sonnet-20240229-v1:0"
+            )
+
+        self.model_id = settings.bedrock_model_id.strip()
+        self.region = settings.aws_region
+
+        # Bedrock Runtime client
         self.client = boto3.client(
-            service_name="bedrock-runtime",
-            region_name=self.region_name,
-            aws_access_key_id=aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=aws_secret_access_key
-            or os.getenv("AWS_SECRET_ACCESS_KEY"),
+            "bedrock-runtime",
+            region_name=self.region,
+            aws_access_key_id=settings.aws_access_key_id.strip(),
+            aws_secret_access_key=settings.aws_secret_access_key.strip(),
         )
+
+    # ==========================================================
+    # Public method
+    # ==========================================================
 
     def generate_sql(
         self,
@@ -50,26 +53,21 @@ class BedrockClient:
         temperature: float = 0.1,
     ) -> dict:
         """
-        Generate SQL query from natural language using Bedrock.
+        Generate a response from Bedrock.
 
-        Args:
-            natural_language_query: User's natural language question
-            schema_context: Database schema context for the prompt
-            tenant_id: Tenant ID for tenant isolation
-            max_tokens: Maximum tokens in response (default: 4096)
-            temperature: Sampling temperature (default: 0.1 for deterministic SQL)
-
-        Returns:
-            dict with 'sql' and 'explanation' keys, or raises exception
-
-        Raises:
-            ClientError: If Bedrock API call fails
-            ValueError: If response is invalid
+        Returns a dict with:
+          - mode: chat | clarification | sql
+          - response: user-facing message
+          - sql: SQL string if mode == sql
+          - explanation: internal explanation (not for users)
         """
-        # Build the prompt for Claude
-        prompt = self._build_prompt(natural_language_query, schema_context, tenant_id)
 
-        # Prepare request body for Claude 3
+        prompt = self._build_prompt(
+            natural_language_query=natural_language_query,
+            schema_context=schema_context,
+            tenant_id=tenant_id,
+        )
+
         body = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": max_tokens,
@@ -83,7 +81,6 @@ class BedrockClient:
         }
 
         try:
-            # Invoke Bedrock model
             response = self.client.invoke_model(
                 modelId=self.model_id,
                 body=json.dumps(body),
@@ -91,135 +88,94 @@ class BedrockClient:
                 accept="application/json",
             )
 
-            # Parse response
-            response_body = json.loads(response.get("body").read())
-            
-            # Extract text from Claude's response
-            text_content = ""
-            for content_block in response_body.get("content", []):
-                if content_block.get("type") == "text":
-                    text_content += content_block.get("text", "")
+            response_body = json.loads(response["body"].read())
 
-            if not text_content:
-                raise ValueError("Empty response from Bedrock model")
+            # Extract text from Claude response blocks
+            text_content = self._extract_text(response_body)
 
-            # Parse SQL and explanation from response
-            sql, explanation = self._parse_response(text_content)
+            # Parse structured JSON from the model
+            try:
+                model_output = json.loads(text_content)
+            except json.JSONDecodeError:
+                raise RuntimeError(
+                    "Model did not return valid JSON.\n"
+                    f"Raw output:\n{text_content}"
+                )
 
             return {
-                "sql": sql,
-                "explanation": explanation,
+                "mode": model_output.get("mode", "sql"),
+                "response": model_output.get("response"),
+                "sql": model_output.get("sql"),
+                "explanation": model_output.get("explanation"),
                 "model_id": self.model_id,
                 "usage": response_body.get("usage", {}),
             }
 
         except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            error_message = e.response.get("Error", {}).get("Message", str(e))
-            raise ClientError(
-                {
-                    "Error": {
-                        "Code": error_code,
-                        "Message": f"Bedrock API error: {error_message}",
-                    }
-                },
-                "InvokeModel",
-            )
+            error_msg = e.response.get("Error", {}).get("Message", str(e))
+            raise RuntimeError(f"Bedrock API error: {error_msg}") from e
+
+    # ==========================================================
+    # Prompt construction
+    # ==========================================================
 
     def _build_prompt(
-        self, natural_language_query: str, schema_context: str, tenant_id: str
+    self,
+    natural_language_query: str,
+    schema_context: str,
+    tenant_id: str,
     ) -> str:
-        """
-        Build the prompt for Claude to generate SQL.
+        return f"""
+You are an AI assistant for an asset-tracking system.
 
-        Args:
-            natural_language_query: User's natural language question
-            schema_context: Database schema context
-            tenant_id: Tenant ID for isolation
+Decide how to respond to the user's message.
 
-        Returns:
-            Formatted prompt string
-        """
-        return f"""You are an expert SQL generator that converts natural language queries to safe, optimized SQL.
+Choose ONE mode:
+- chat: greetings or general questions
+- clarification: request is ambiguous or missing details
+- sql: request clearly asks for data
 
-CRITICAL REQUIREMENTS:
-1. Generate ONLY valid SQL SELECT queries (no INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE)
-2. ALL queries MUST include tenant isolation: WHERE accountId = '{tenant_id}'
-3. The tenant column is 'accountId', NOT 'tenant_id'
-4. Use parameterized queries or ensure accountId is properly quoted
-5. Do not generate queries that could modify or delete data
-6. Ensure SQL is safe from SQL injection attacks
-7. Return only the SQL query in a code block labeled "SQL", followed by a brief explanation
+When responding:
+- Be helpful and concise.
+- It's okay to briefly explain what you're doing.
+- Use natural language.
 
-DATABASE SCHEMA:
+SQL rules (only if mode = "sql"):
+- Generate a SELECT query only.
+- Use the schema provided.
+- Always filter by accountId = "{tenant_id}".
+
+Return valid JSON in this format:
+{{
+  "mode": "chat | clarification | sql",
+  "response": "Natural language response",
+  "sql": "SQL query if mode is sql, otherwise null"
+}}
+
+Database schema:
 {schema_context}
 
-USER QUESTION:
+User input:
 {natural_language_query}
+""".strip()
 
-Generate a safe SQL SELECT query that:
-- Answers the user's question
-- Includes tenant isolation with accountId = '{tenant_id}'
-- Uses proper SQL syntax
-- Is optimized for performance
-- Respects table name casing (some tables are uppercase like JOBINSTANCE, TAG, etc.)
 
-Return your response in this exact format:
 
-SQL:
-```sql
-SELECT ...
-```
+    # ==========================================================
+    # Response parsing helpers
+    # ==========================================================
 
-EXPLANATION:
-[Brief explanation of what the query does]
-"""
-
-    def _parse_response(self, response_text: str) -> tuple[str, str]:
+    def _extract_text(self, response_body: dict) -> str:
         """
-        Parse SQL and explanation from Claude's response.
-
-        Args:
-            response_text: Raw response text from Claude
-
-        Returns:
-            Tuple of (sql_query, explanation)
+        Extract text content from Claude-style Bedrock responses.
         """
-        sql = ""
-        explanation = ""
+        text = ""
+        for block in response_body.get("content", []):
+            if block.get("type") == "text":
+                text += block.get("text", "")
 
-        # Try to extract SQL from code block
-        sql_block_start = response_text.find("```sql")
-        if sql_block_start != -1:
-            sql_block_start = response_text.find("\n", sql_block_start) + 1
-            sql_block_end = response_text.find("```", sql_block_start)
-            if sql_block_end != -1:
-                sql = response_text[sql_block_start:sql_block_end].strip()
+        text = text.strip()
+        if not text:
+            raise ValueError("Model returned no text content")
 
-        # If no SQL block found, try to find SQL: marker
-        if not sql:
-            sql_marker = response_text.find("SQL:")
-            if sql_marker != -1:
-                sql_start = response_text.find("\n", sql_marker) + 1
-                # Look for next section or end
-                explanation_marker = response_text.find("EXPLANATION:", sql_start)
-                if explanation_marker != -1:
-                    sql = response_text[sql_start:explanation_marker].strip()
-                else:
-                    sql = response_text[sql_start:].strip()
-
-        # Extract explanation
-        explanation_marker = response_text.find("EXPLANATION:")
-        if explanation_marker != -1:
-            explanation = response_text[explanation_marker + len("EXPLANATION:"):].strip()
-
-        # Clean up SQL (remove markdown code blocks if still present)
-        sql = sql.replace("```sql", "").replace("```", "").strip()
-
-        if not sql:
-            raise ValueError("Could not extract SQL from Bedrock response")
-
-        return sql, explanation or "Generated SQL query from natural language."
-
-
-
+        return text

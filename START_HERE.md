@@ -33,11 +33,30 @@ npm run dev
 - Should see: `Local: http://localhost:5173/`
 - Open that URL in your browser
 
-## Step 3: Test
+## Step 3: Verify Everything Works
 
-1. **Test backend:** Open `http://localhost:8000/health` in browser
-2. **Test frontend:** Open `http://localhost:5173` in browser
-3. **Try a query:** Ask "Show me all equipment locations"
+### Test Backend Health
+Open in browser or use curl:
+```powershell
+# Health check
+curl http://localhost:8000/health
+# Expected: {"status":"healthy"}
+
+# Database connection test
+curl http://localhost:8000/db-ping
+# Expected: {"status":"ok","result":[{"ok":1}]}
+```
+
+### Test Frontend
+1. Open browser: `http://localhost:5173`
+2. You should see the Sargon AI chat interface
+
+### Test a Query
+Try asking:
+- "Show me all equipment locations"
+- "What jobs are currently active?"
+- "List all tags"
+- "Show me employees"
 
 ## Common Issues
 
@@ -54,4 +73,31 @@ npm run dev
 ### Port already in use
 - Kill process on port 8000: `netstat -ano | findstr :8000`
 - Or use different port: `--port 8001`
+
+### Database connection fails
+- Verify database credentials in `.env`
+- Check network connectivity to database
+- Ensure database is accessible from your machine
+
+### API returns errors
+- Check backend terminal for error messages
+- Verify AWS credentials are correct
+- Ensure Bedrock access is enabled
+- Verify tenant_id is set (see `ENV_FILE_GUIDE.md`)
+
+## Next Steps
+
+Once everything is working:
+1. Test with real queries from your database
+2. Verify tenant isolation is working (accountId filtering)
+3. Test error handling with invalid queries
+4. Check that SQL generation is accurate
+
+## Additional Documentation
+
+- **Setup & Requirements:** See `SETUP_REQUIREMENTS.md`
+- **Environment Variables:** See `ENV_FILE_GUIDE.md`
+- **Troubleshooting:** See `TROUBLESHOOTING.md`
+- **Backend Details:** See `backend/README.md`
+- **Testing Guide:** See `backend/TESTING.md`
 

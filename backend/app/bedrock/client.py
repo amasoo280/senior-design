@@ -140,6 +140,15 @@ When responding:
 - It's okay to briefly explain what you're doing.
 - Use natural language.
 
+CRITICAL OUTPUT RULES (MUST FOLLOW):
+- The response MUST be valid JSON.
+- Do NOT include any text outside the JSON object.
+- All string values MUST be single-line (no newlines).
+- The "sql" field MUST be a single-line string.
+- Do NOT include formatting, comments, or stray words inside the SQL.
+- Do NOT include markdown or code fences.
+
+
 SQL rules (only if mode = "sql"):
 - Generate a SELECT query only.
 - Use the schema provided.

@@ -1,6 +1,8 @@
 """
 Database schema context provider for NL→SQL generation.
-Aligned with the actual Sargon Partners database schema.
+
+This schema is STRICTLY aligned with the actual Sargon Partners database
+and intentionally conservative to prevent SQL hallucinations.
 """
 
 from typing import Dict, Optional
@@ -12,15 +14,17 @@ class SchemaContext:
     def __init__(self, schema_info: Optional[Dict] = None):
         if schema_info is None:
             schema_info = self._get_default_schema()
-
         self.schema_info = schema_info
 
     def get_schema_context(self) -> str:
-        """Return formatted schema context string for the LLM prompt."""
+        """
+        Return formatted schema context string for the LLM prompt.
+        """
         parts = []
 
         parts.append("Database: Sargon Partners asset tracking database")
-        parts.append("Tenant isolation: ALL queries MUST filter by accountId")
+        parts.append("IMPORTANT: ALL queries MUST include WHERE accountId = '<accountId>'")
+        parts.append("Timestamp columns are stored as BIGINT milliseconds unless noted.")
 
         for table in self.schema_info["tables"]:
             parts.append(f"\nTABLE {table['name']}:")
@@ -28,164 +32,153 @@ class SchemaContext:
             for col in table["columns"]:
                 parts.append(f"  - {col}")
 
+            if "notes" in table:
+                for note in table["notes"]:
+                    parts.append(f"    NOTE: {note}")
+
         return "\n".join(parts)
 
     def _get_default_schema(self) -> Dict:
         """
-        Schema aligned with the real database ERD.
-        Focused on correctness over completeness.
+        Schema aligned exactly with the production EER diagram.
+        Only customer-relevant tables are included.
         """
         return {
             "tables": [
+
+                # -------------------------------------------------
+                # TAG
+                # -------------------------------------------------
                 {
                     "name": "TAG",
                     "columns": [
                         "cloudUUID VARCHAR(40) PRIMARY KEY",
                         "accountId VARCHAR(40)",
                         "description TEXT",
-                        "rfid VARCHAR(32)",
-                        "syncTimestamp BIGINT",
+                        "serialNumber TEXT",
                         "type TEXT",
-                        "cost TEXT",
-                        "datePurchased TEXT",
-                        "notes TEXT",
-                        "rentalCost TEXT",
-                        "integrationId VARCHAR(40)",
-                        "barcode TEXT",
-                        "rentalCostTwo TEXT",
                         "isDeleted TINYINT",
-                        "iBeaconUUID VARCHAR(50)",
-                        "iBeaconMajor INT",
-                        "iBeaconMinor INT",
                         "latestLocationName TEXT",
-                        "latestLocationTimestamp BIGINT",
                         "latestLocationUUID VARCHAR(40)",
-                        "tagAddTimestamp BIGINT",
+                        "latestLocationTimestamp BIGINT",
                         "latestLocationLatitude DOUBLE",
                         "latestLocationLongitude DOUBLE",
-                        "sublocation TEXT",
-                        "assetNumber VARCHAR(512)",
-                        "serialNumber TEXT",
-                        "model TEXT",
-                        "manufacturer TEXT",
+                        "tagAddTimestamp BIGINT",
+                        "syncTimestamp BIGINT",
+                    ],
+                    "notes": [
+                        "cloudUUID is the unique identifier for a tag",
+                        "latestLocationTimestamp represents the most recent known location (milliseconds)",
+                        "DO NOT use tagUUID (does not exist)",
                     ],
                 },
+
+                # -------------------------------------------------
+                # EquipmentLocation
+                # -------------------------------------------------
                 {
                     "name": "EquipmentLocation",
                     "columns": [
                         "cloudUUID VARCHAR(40) PRIMARY KEY",
                         "accountId VARCHAR(40)",
-                        "employeeCloseUUID VARCHAR(40)",
                         "employeeOpenUUID VARCHAR(40)",
-                        "startTimestamp BIGINT",
-                        "endTimestamp BIGINT",
+                        "employeeCloseUUID VARCHAR(40)",
                         "locationName TEXT",
                         "locationType INT",
+                        "startTimestamp BIGINT",
+                        "endTimestamp BIGINT",
                         "syncTimestamp BIGINT",
                         "notes TEXT",
-                        "dispatchLatitude DOUBLE",
-                        "dispatchLongitude DOUBLE",
-                        "pickupLatitude DOUBLE",
-                        "pickupLongitude DOUBLE",
+                    ],
+                    "notes": [
+                        "Represents the CURRENT location/state of equipment",
+                        "Use startTimestamp and endTimestamp for time-based queries",
                     ],
                 },
+
+                # -------------------------------------------------
+                # EquipmentLocationHistory
+                # -------------------------------------------------
                 {
                     "name": "EquipmentLocationHistory",
                     "columns": [
                         "cloudUUID VARCHAR(40)",
                         "accountId VARCHAR(40)",
-                        "locationName TEXT",
                         "locationUUID VARCHAR(40)",
-                        "scanTimestamp BIGINT",
+                        "locationName TEXT",
+                        "syncTimestamp BIGINT",
                         "transferUUID VARCHAR(40)",
                         "scanType TINYINT",
                         "sublocation TEXT",
                     ],
+                    "notes": [
+                        "Historical movement records for equipment",
+                        "Use syncTimestamp for time filtering (milliseconds)",
+                        "DO NOT use scanTimestamp (does not exist)",
+                        "Common join: TAG.latestLocationUUID = EquipmentLocationHistory.locationUUID",
+                    ],
                 },
+
+                # -------------------------------------------------
+                # JOBINSTANCE
+                # -------------------------------------------------
                 {
                     "name": "JOBINSTANCE",
                     "columns": [
                         "cloudUUID VARCHAR(40) PRIMARY KEY",
-                        "jobName TEXT",
                         "jobUUID VARCHAR(40)",
+                        "jobName TEXT",
+                        "employeeUUID VARCHAR(40)",
                         "jobStartTimestamp BIGINT",
                         "jobCompleteTimestamp BIGINT",
                         "syncTimestamp BIGINT",
                         "isDeleted TINYINT",
-                        "employeeName TEXT",
-                        "employeeUUID VARCHAR(40)",
                         "accountId VARCHAR(40)",
                     ],
-                },
-                {
-                    "name": "DATAEVENT",
-                    "columns": [
-                        "cloudUUID VARCHAR(40)",
-                        "accountId VARCHAR(40)",
-                        "syncTimestamp BIGINT",
-                        "eventTime BIGINT",
-                        "user TEXT",
-                        "prevValue TEXT",
-                        "postValue TEXT",
-                        "eventType INT",
+                    "notes": [
+                        "Represents jobs assigned to employees",
+                        "Use jobStartTimestamp and jobCompleteTimestamp for duration queries",
                     ],
                 },
+
+                # -------------------------------------------------
+                # EMPLOYEE
+                # -------------------------------------------------
                 {
                     "name": "EMPLOYEE",
                     "columns": [
                         "cloudUUID VARCHAR(40) PRIMARY KEY",
                         "name TEXT",
-                        "company TEXT",
-                        "pin TEXT",
-                        "accountId VARCHAR(40)",
-                        "deviceId VARCHAR(40)",
                         "login VARCHAR(128)",
+                        "deviceId VARCHAR(40)",
+                        "employeeLevel INT",
+                        "accountId VARCHAR(40)",
+                        "syncTimestamp BIGINT",
+                    ],
+                    "notes": [
+                        "Employee identity and login information",
+                        "DO NOT use company or pin unless explicitly joined elsewhere",
                     ],
                 },
+
+                # -------------------------------------------------
+                # DATAEVENT
+                # -------------------------------------------------
                 {
-                    "name": "BeaconScan",
+                    "name": "DATAEVENT",
                     "columns": [
                         "cloudUUID VARCHAR(40)",
-                        "beaconId VARCHAR(50)",
-                        "scanTime BIGINT",
-                        "latitude DOUBLE",
-                        "longitude DOUBLE",
-                        "batteryLevel INT",
-                        "rssI INT",
-                    ],
-                },
-                {
-                    "name": "BeaconCurrentStatus",
-                    "columns": [
-                        "beaconId VARCHAR(50)",
-                        "readerId VARCHAR(50)",
-                        "scanTime BIGINT",
-                        "latitude DOUBLE",
-                        "longitude DOUBLE",
-                        "batteryLevel INT",
-                        "speed INT",
-                    ],
-                },
-                {
-                    "name": "SUBLOCATION",
-                    "columns": [
-                        "cloudUUID VARCHAR(50)",
-                        "accountId VARCHAR(50)",
-                        "sublocation TEXT",
-                        "syncTimestamp BIGINT",
-                        "isDeleted TINYINT",
-                    ],
-                },
-                {
-                    "name": "ITVUSER",
-                    "columns": [
-                        "email VARCHAR(128)",
-                        "apiKey VARCHAR(40)",
-                        "accountType INT",
                         "accountId VARCHAR(40)",
-                        "companyName TEXT",
-                        "timeZone VARCHAR(40)",
-                        "isAccountActive TINYINT",
+                        "eventType INT",
+                        "prevValue TEXT",
+                        "postValue TEXT",
+                        "eventTime BIGINT",
+                        "syncTimestamp BIGINT",
+                        "user TEXT",
+                    ],
+                    "notes": [
+                        "Audit-style event records",
+                        "Use eventTime or syncTimestamp for time filtering",
                     ],
                 },
             ]

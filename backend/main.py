@@ -1,10 +1,13 @@
 import logging
 import os
+import secrets
+from datetime import datetime, timedelta
 from typing import Optional, List, Any
 
-from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi import FastAPI, HTTPException, Header, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from botocore.exceptions import ClientError
 
@@ -55,7 +58,22 @@ app.add_middleware(
 bedrock_client = BedrockClient()
 schema_context = SchemaContext()
 
+# Simple token storage (in production, use Redis or database)
+_active_tokens: dict[str, datetime] = {}
+TOKEN_EXPIRY_HOURS = 24
+
+# Security
+security = HTTPBearer(auto_error=False)
+
 # Request/Response models
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class LoginResponse(BaseModel):
+    token: str
+    expires_at: str
+
 class AskRequest(BaseModel):
     query: str = Field(..., description="Natural language query")
     tenant_id: Optional[str] = Field(None, description="Tenant ID (optional if provided in header)")
@@ -85,6 +103,65 @@ def root():
         }
     }
 
+def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> bool:
+    """Verify authentication token."""
+    if not credentials:
+        return False
+    
+    token = credentials.credentials
+    if token not in _active_tokens:
+        return False
+    
+    # Check if token expired
+    if datetime.now() > _active_tokens[token]:
+        del _active_tokens[token]
+        return False
+    
+    return True
+
+def require_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """Dependency to require authentication."""
+    if not verify_token(credentials):
+        raise HTTPException(status_code=401, detail="Unauthorized - Invalid or expired token")
+    return True
+
+@app.post("/login", response_model=LoginResponse)
+def login(request: LoginRequest):
+    """
+    Simple username/password login.
+    
+    Returns a token that should be included in Authorization header for protected endpoints.
+    """
+    # Verify credentials
+    if request.username != settings.auth_username or request.password != settings.auth_password:
+        logger.warning(f"Failed login attempt for username: {request.username}")
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    # Generate token
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now() + timedelta(hours=TOKEN_EXPIRY_HOURS)
+    _active_tokens[token] = expires_at
+    
+    logger.info(f"User '{request.username}' logged in successfully")
+    
+    return LoginResponse(
+        token=token,
+        expires_at=expires_at.isoformat()
+    )
+
+@app.post("/logout")
+def logout(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """Logout and invalidate token."""
+    if credentials and credentials.credentials in _active_tokens:
+        del _active_tokens[credentials.credentials]
+        logger.info("User logged out")
+    return {"message": "Logged out successfully"}
+
+@app.get("/auth/verify")
+def verify_auth(authenticated: bool = Depends(require_auth)):
+    """Verify if current token is valid."""
+    return {"authenticated": True}
+
 @app.get("/health")
 def health():
     return {"status": "healthy"}
@@ -100,7 +177,11 @@ def db_ping():
         raise HTTPException(status_code=500, detail=f"Database error: {exc}")
 
 @app.get("/logs")
-def get_application_logs(limit: int = 100, level: Optional[str] = None):
+def get_application_logs(
+    limit: int = 100,
+    level: Optional[str] = None,
+    authenticated: bool = Depends(require_auth)
+):
     """
     Get recent application logs for viewing in the web interface.
     
@@ -123,7 +204,7 @@ def get_application_logs(limit: int = 100, level: Optional[str] = None):
     }
 
 @app.get("/analytics")
-def get_analytics():
+def get_analytics(authenticated: bool = Depends(require_auth)):
     """
     Get analytics and metrics data for the dashboard.
     
@@ -144,10 +225,14 @@ async def ask(
     """
     Convert natural language query to SQL and optionally execute it.
     """
+    # Track metrics: increment request count (track ALL requests, even failed ones)
+    increment_request_count()
+    
     # Determine tenant_id from request body, header, or env (NO literal "default" fallback)
     tenant_id = request.tenant_id or x_tenant_id or settings.default_tenant_id
     
     if not tenant_id:
+        increment_error_count("missing_tenant_id")
         raise HTTPException(
             status_code=400,
             detail="Missing tenant_id (accountId). Provide it in request body, X-Tenant-ID header, or set DEFAULT_TENANT_ID in .env"
@@ -155,6 +240,7 @@ async def ask(
     
     # Reject literal "default" string
     if tenant_id == "default":
+        increment_error_count("invalid_tenant_id")
         raise HTTPException(
             status_code=400,
             detail="Invalid tenant_id: 'default' is not allowed. Provide a valid tenant ID."
@@ -237,8 +323,9 @@ async def ask(
                 detail="Bedrock returned SQL mode but no SQL query was generated"
             )
         
-        # Track metrics: SQL query generated
-        increment_sql_query_count()
+        # Track metrics: SQL query generated (only when we have valid SQL)
+        if generated_sql:
+            increment_sql_query_count()
 
         # Log: Generated SQL (truncated for safety)
         # This helps debug what SQL was generated before validation

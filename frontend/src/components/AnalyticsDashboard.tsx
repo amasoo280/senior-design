@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, RefreshCw, TrendingUp, AlertCircle, Database, MessageSquare, Clock, CheckCircle } from 'lucide-react';
 import { API_ENDPOINTS } from '../config';
+import { getAuthHeaders } from '../utils/auth';
 
 interface AnalyticsData {
   summary: {
@@ -42,7 +43,9 @@ const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ onClose }) => {
   const fetchAnalytics = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(API_ENDPOINTS.analytics);
+      const response = await fetch(API_ENDPOINTS.analytics, {
+        headers: getAuthHeaders(),
+      });
       if (!response.ok) {
         throw new Error('Failed to fetch analytics');
       }

@@ -10,6 +10,12 @@ export const API_ENDPOINTS = {
   health: `${API_BASE_URL}/health`,
   logs: `${API_BASE_URL}/logs`,
   analytics: `${API_BASE_URL}/analytics`,
+  login: `${API_BASE_URL}/login`,
+  logout: `${API_BASE_URL}/logout`,
+  verifyAuth: `${API_BASE_URL}/auth/verify`,
 } as const;
+
+// Auth token storage key
+export const AUTH_TOKEN_KEY = 'sargon_auth_token';
 
 

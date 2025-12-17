@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader2, User, Code, AlertCircle, LogIn, UserCircle, FileText, BarChart3 } from 'lucide-react';
+import { Send, Loader2, User, Code, AlertCircle, UserCircle, FileText, BarChart3, LogOut } from 'lucide-react';
 import { API_ENDPOINTS, DEFAULT_TENANT_ID } from '../config';
+import { getAuthHeaders, logout as authLogout } from '../utils/auth';
 import LogsViewer from './LogsViewer';
 import AnalyticsDashboard from './AnalyticsDashboard';
 
@@ -17,7 +18,11 @@ interface Message {
   executionError?: string;
 }
 
-const Dashboard: React.FC = () => {
+interface DashboardProps {
+  onLogout?: () => void;
+}
+
+const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -68,7 +73,7 @@ const Dashboard: React.FC = () => {
       const response = await fetch(API_ENDPOINTS.ask, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
           'X-Tenant-ID': DEFAULT_TENANT_ID,
         },
         body: JSON.stringify({
@@ -188,7 +193,7 @@ const Dashboard: React.FC = () => {
       {/* Top Bar */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-[#0f0f23]">
         <div className="flex items-center gap-2">
-          <h1 className="text-lg font-semibold text-white">Sargon AI</h1>
+          <h1 className="text-lg font-semibold text-white">Invisitag Support</h1>
         </div>
         <div className="relative flex items-center gap-2">
           <button
@@ -217,12 +222,20 @@ const Dashboard: React.FC = () => {
           {showProfileMenu && (
             <div className="absolute right-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-lg py-1 z-10">
               <button className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2">
-                <LogIn className="w-4 h-4" />
-                Login
-              </button>
-              <button className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2">
                 <UserCircle className="w-4 h-4" />
                 Account Settings
+              </button>
+              <button
+                onClick={async () => {
+                  await authLogout();
+                  if (onLogout) {
+                    onLogout();
+                  }
+                }}
+                className="w-full text-left px-4 py-2 text-sm text-red-300 hover:bg-slate-700 flex items-center gap-2"
+              >
+                <LogOut className="w-4 h-4" />
+                Logout
               </button>
             </div>
           )}
@@ -234,7 +247,7 @@ const Dashboard: React.FC = () => {
         <div className="max-w-3xl mx-auto space-y-6">
           {messages.length === 0 && (
             <div className="text-center py-12">
-              <h2 className="text-2xl font-semibold text-slate-300 mb-2">Welcome to Sargon AI</h2>
+              <h2 className="text-2xl font-semibold text-slate-300 mb-2">Welcome to Invisitag Support</h2>
               <p className="text-slate-500">Ask me anything about your database</p>
             </div>
           )}

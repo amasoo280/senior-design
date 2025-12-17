@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, RefreshCw, Filter, Download } from 'lucide-react';
 import { API_ENDPOINTS } from '../config';
+import { getAuthHeaders } from '../utils/auth';
 
 interface LogEntry {
   timestamp: string;
@@ -32,7 +33,9 @@ const LogsViewer: React.FC<LogsViewerProps> = ({ onClose }) => {
         params.append('level', filterLevel);
       }
 
-      const response = await fetch(`${API_ENDPOINTS.logs}?${params.toString()}`);
+      const response = await fetch(`${API_ENDPOINTS.logs}?${params.toString()}`, {
+        headers: getAuthHeaders(),
+      });
       if (!response.ok) {
         throw new Error('Failed to fetch logs');
       }

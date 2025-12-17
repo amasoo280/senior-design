@@ -48,6 +48,10 @@ if USE_V2_CONFIG:
         # Logging configuration
         log_level: str = Field("INFO", env="LOG_LEVEL")
 
+        # Authentication (simple username/password)
+        auth_username: str = Field("admin", env="AUTH_USERNAME")
+        auth_password: str = Field("admin", env="AUTH_PASSWORD")
+
 
 else:
     # =============================
@@ -84,6 +88,10 @@ else:
 
         # Logging configuration
         log_level: str = "INFO"
+
+        # Authentication (simple username/password)
+        auth_username: str = "admin"
+        auth_password: str = "admin"
 
 
 settings = Settings()

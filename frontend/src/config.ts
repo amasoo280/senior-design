@@ -8,6 +8,8 @@ export const DEFAULT_TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID;
 export const API_ENDPOINTS = {
   ask: `${API_BASE_URL}/ask`,
   health: `${API_BASE_URL}/health`,
+  logs: `${API_BASE_URL}/logs`,
+  analytics: `${API_BASE_URL}/analytics`,
 } as const;
 
 

@@ -1,0 +1,25 @@
+"""Metrics tracking module for analytics dashboard."""
+
+from app.metrics.tracker import (
+    get_metrics,
+    increment_request_count,
+    increment_error_count,
+    increment_sql_query_count,
+    increment_chat_count,
+    increment_clarification_count,
+    record_query_execution_time,
+    record_bedrock_call_time,
+)
+
+__all__ = [
+    "get_metrics",
+    "increment_request_count",
+    "increment_error_count",
+    "increment_sql_query_count",
+    "increment_chat_count",
+    "increment_clarification_count",
+    "record_query_execution_time",
+    "record_bedrock_call_time",
+]
+
+

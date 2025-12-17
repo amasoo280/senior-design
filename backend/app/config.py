@@ -45,6 +45,9 @@ if USE_V2_CONFIG:
         # Optional tenant
         default_tenant_id: str | None = Field(None, env="DEFAULT_TENANT_ID")
 
+        # Logging configuration
+        log_level: str = Field("INFO", env="LOG_LEVEL")
+
 
 else:
     # =============================
@@ -78,6 +81,9 @@ else:
 
 
         default_tenant_id: str | None = None
+
+        # Logging configuration
+        log_level: str = "INFO"
 
 
 settings = Settings()

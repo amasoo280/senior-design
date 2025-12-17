@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader2, User, Code, AlertCircle, LogIn, UserCircle } from 'lucide-react';
+import { Send, Loader2, User, Code, AlertCircle, LogIn, UserCircle, FileText, BarChart3 } from 'lucide-react';
 import { API_ENDPOINTS, DEFAULT_TENANT_ID } from '../config';
+import LogsViewer from './LogsViewer';
+import AnalyticsDashboard from './AnalyticsDashboard';
 
 interface Message {
   id: string;
@@ -20,6 +22,8 @@ const Dashboard: React.FC = () => {
   const [input, setInput] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
+  const [showLogs, setShowLogs] = useState<boolean>(false);
+  const [showAnalytics, setShowAnalytics] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -186,7 +190,23 @@ const Dashboard: React.FC = () => {
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-semibold text-white">Sargon AI</h1>
         </div>
-        <div className="relative">
+        <div className="relative flex items-center gap-2">
+          <button
+            onClick={() => setShowAnalytics(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+            title="View Analytics Dashboard"
+          >
+            <BarChart3 className="w-5 h-5 text-slate-400" />
+            <span className="text-sm text-slate-300">Analytics</span>
+          </button>
+          <button
+            onClick={() => setShowLogs(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+            title="View Application Logs"
+          >
+            <FileText className="w-5 h-5 text-slate-400" />
+            <span className="text-sm text-slate-300">Logs</span>
+          </button>
           <button
             onClick={() => setShowProfileMenu(!showProfileMenu)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
@@ -346,6 +366,12 @@ const Dashboard: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {/* Logs Viewer Modal */}
+      {showLogs && <LogsViewer onClose={() => setShowLogs(false)} />}
+      
+      {/* Analytics Dashboard Modal */}
+      {showAnalytics && <AnalyticsDashboard onClose={() => setShowAnalytics(false)} />}
     </div>
   );
 };

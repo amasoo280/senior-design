@@ -11,15 +11,30 @@ from botocore.exceptions import ClientError
 from app.bedrock.client import BedrockClient
 from app.config import settings
 from app.executor.executor import execute_query, DatabaseExecutionError
+from app.logging.logger import (
+    get_logger,
+    log_request_start,
+    log_request_end,
+    set_request_context,
+    safe_log_sql,
+    safe_truncate,
+)
+from app.logging import get_logs
+from app.metrics import (
+    get_metrics,
+    increment_request_count,
+    increment_error_count,
+    increment_sql_query_count,
+    increment_chat_count,
+    increment_clarification_count,
+    record_query_execution_time,
+    record_bedrock_call_time,
+)
 from app.safety.guardrails import SQLGuardrails
 from app.schema.context import SchemaContext
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Get structured logger for this module
+logger = get_logger(__name__)
 
 app = FastAPI(
     title="Sargon Partners AI Chatbot API",
@@ -64,7 +79,9 @@ def root():
         "endpoints": {
             "/ask": "POST - Convert natural language to SQL",
             "/health": "GET - Health check",
-            "/db-ping": "GET - Database connection test"
+            "/db-ping": "GET - Database connection test",
+            "/logs": "GET - View application logs",
+            "/analytics": "GET - Get analytics and metrics"
         }
     }
 
@@ -81,6 +98,43 @@ def db_ping():
     except DatabaseExecutionError as exc:
         logger.error(f"Database ping failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Database error: {exc}")
+
+@app.get("/logs")
+def get_application_logs(limit: int = 100, level: Optional[str] = None):
+    """
+    Get recent application logs for viewing in the web interface.
+    
+    Args:
+        limit: Maximum number of logs to return (default: 100, max: 500)
+        level: Filter by log level (INFO, WARNING, ERROR, DEBUG) - optional
+        
+    Returns:
+        List of log entries with timestamp, level, module, request_id, tenant_id, and message
+    """
+    # Limit max logs to prevent memory issues
+    limit = min(limit, 500)
+    
+    logs = get_logs(limit=limit, level=level)
+    
+    return {
+        "logs": logs,
+        "count": len(logs),
+        "total_available": len(logs),
+    }
+
+@app.get("/analytics")
+def get_analytics():
+    """
+    Get analytics and metrics data for the dashboard.
+    
+    Returns:
+        Dictionary with metrics including:
+        - Summary (total requests, errors, SQL queries, etc.)
+        - Error breakdown by type
+        - Performance metrics (avg execution times)
+        - Hourly request/error trends
+    """
+    return get_metrics()
 
 @app.post("/ask", response_model=AskResponse)
 async def ask(
@@ -106,18 +160,22 @@ async def ask(
             detail="Invalid tenant_id: 'default' is not allowed. Provide a valid tenant ID."
         )
 
-    logger.info(f"Processing query for tenant {tenant_id}: {request.query[:100]}...")
+    # Generate unique request_id and log incoming request
+    # This creates a request-scoped logging context for all subsequent logs
+    request_id = log_request_start(logger, request.query, tenant_id)
 
     try:
         # Get schema context
         schema_context_str = schema_context.get_schema_context()
 
         # Generate response using Bedrock
+        # Log: Track when we call Bedrock API
         logger.info("Calling Bedrock to generate response...")
         bedrock_result = bedrock_client.generate_sql(
             natural_language_query=request.query,
             schema_context=schema_context_str,
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
+            request_id=request_id
         )
 
         # Extract response components
@@ -131,7 +189,16 @@ async def ask(
 
         # Handle non-SQL modes (chat or clarification)
         if mode in ("chat", "clarification"):
+            # Log: Track when we skip SQL processing for chat/clarification
             logger.info(f"Bedrock returned {mode} mode - skipping SQL validation and execution")
+            
+            # Track metrics: increment chat/clarification count
+            if mode == "chat":
+                increment_chat_count()
+            elif mode == "clarification":
+                increment_clarification_count()
+            
+            log_request_end(logger, request_id, success=True)
             return AskResponse(
                 sql="",
                 explanation=explanation or response_text or "Chat response",
@@ -145,7 +212,9 @@ async def ask(
 
         # Only proceed with SQL validation/execution when mode == "sql"
         if mode != "sql":
+            # Log: Warning for unexpected modes
             logger.warning(f"Unexpected mode '{mode}' - treating as non-SQL")
+            log_request_end(logger, request_id, success=True)
             return AskResponse(
                 sql="",
                 explanation=explanation or "Unexpected response mode",
@@ -159,25 +228,39 @@ async def ask(
 
         # Mode is "sql" - validate that SQL was generated
         if not generated_sql:
+            # Log: Error when SQL mode but no SQL generated
             logger.error("Mode is 'sql' but no SQL was generated")
+            increment_error_count("no_sql_generated")
+            log_request_end(logger, request_id, success=False, error="No SQL generated in SQL mode")
             raise HTTPException(
                 status_code=500,
                 detail="Bedrock returned SQL mode but no SQL query was generated"
             )
+        
+        # Track metrics: SQL query generated
+        increment_sql_query_count()
 
-        logger.info(f"Generated SQL: {generated_sql[:200]}...")
+        # Log: Generated SQL (truncated for safety)
+        # This helps debug what SQL was generated before validation
+        safe_log_sql(logger, logging.INFO, "Generated SQL:", generated_sql)
 
         # Initialize guardrails only for SQL mode
         guardrails = SQLGuardrails(tenant_id)
 
         # Validate SQL
+        # Log: Track SQL validation result (WARNING level for failures)
         is_valid, error_message = guardrails.validate_query(generated_sql)
         if not is_valid:
             logger.warning(f"SQL validation failed: {error_message}")
+            increment_error_count("sql_validation_failed")
+            log_request_end(logger, request_id, success=False, error=f"SQL validation failed: {error_message}")
             raise HTTPException(
                 status_code=400,
                 detail=f"SQL validation failed: {error_message}"
             )
+        
+        # Log: SQL validation passed
+        logger.info("SQL validation passed")
 
         # Base response for SQL mode
         response_data = {
@@ -193,22 +276,38 @@ async def ask(
 
         # Execute query if requested (only for SQL mode)
         if request.execute:
+            # Log: Track when we execute SQL
             logger.info("Executing SQL query...")
             try:
-                rows = execute_query(generated_sql)
+                import time
+                start_time = time.time()
+                rows = execute_query(generated_sql, request_id=request_id)
+                execution_time_ms = (time.time() - start_time) * 1000
+                
+                # Track metrics: record execution time
+                record_query_execution_time(execution_time_ms)
+                
                 response_data["rows"] = rows
                 response_data["row_count"] = len(rows)
+                # Log: Track number of rows returned (helps debug query results)
+                logger.info(f"Query executed successfully | rows_returned={len(rows)}")
             except DatabaseExecutionError as db_exc:
+                # Log: Execution errors without crashing (ERROR level)
                 error_msg = str(db_exc)
                 logger.error(f"Database execution error: {error_msg}")
+                increment_error_count("database_execution_error")
                 response_data["execution_error"] = error_msg
 
+        # Log: Request completed successfully
+        log_request_end(logger, request_id, success=True)
         return AskResponse(**response_data)
 
     except ClientError as aws_exc:
         error_code = aws_exc.response["Error"]["Code"]
         error_message = aws_exc.response["Error"]["Message"]
         logger.error(f"Bedrock API error ({error_code}): {error_message}")
+        increment_error_count("bedrock_api_error")
+        log_request_end(logger, request_id, success=False, error=f"Bedrock API error: {error_code}")
         raise HTTPException(
             status_code=503,
             detail=f"AWS Bedrock error ({error_code})"
@@ -219,6 +318,8 @@ async def ask(
 
     except Exception as e:
         logger.exception(f"Unexpected error processing query: {e}")
+        increment_error_count("unexpected_error")
+        log_request_end(logger, request_id, success=False, error=str(e))
         raise HTTPException(
             status_code=500,
             detail="Internal server error"

@@ -137,7 +137,7 @@ class SchemaContext:
                     ],
                     "notes": [
                         "Represents jobs assigned to employees",
-                        "Use jobStartTimestamp and jobCompleteTimestamp for duration queries",
+                        "Use jobCompleteTimestamp and syncTimestamp for time-based queries",
                     ],
                 },
 

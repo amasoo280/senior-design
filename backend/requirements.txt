@@ -15,4 +15,7 @@ sqlalchemy>=2.0
 pymysql>=1.1
 python-dotenv>=1.0
 
+# ReportLab for PDF generation
+reportlab>=4.0.0
+
 

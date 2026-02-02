@@ -2,14 +2,15 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 
 from fastapi import FastAPI, HTTPException, Header, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from botocore.exceptions import ClientError
+from pathlib import Path
 
 from app.bedrock.client import BedrockClient
 from app.config import settings
@@ -35,6 +36,7 @@ from app.metrics import (
 )
 from app.safety.guardrails import SQLGuardrails
 from app.schema.context import SchemaContext
+from app.exporter.export_manager import export_results
 
 # Get structured logger for this module
 logger = get_logger(__name__)
@@ -88,6 +90,11 @@ class AskResponse(BaseModel):
     rows: Optional[List[Any]] = None
     row_count: Optional[int] = None
     execution_error: Optional[str] = None
+
+class ExportRequest(BaseModel):
+    rows: List[Dict[str, Any]]
+    request_id: str
+    format_type: str = "both"  # "csv", "pdf", or "both"
 
 @app.get("/")
 def root():
@@ -411,3 +418,85 @@ async def ask(
             status_code=500,
             detail="Internal server error"
         )
+
+@app.post("/export")
+def export(request: ExportRequest, authenticated: bool = Depends(require_auth)):
+    """
+    Export query results to CSV and/or PDF files.
+    
+    Args:
+        rows: List of result dictionaries from a query
+        request_id: Unique identifier for the query
+        format_type: "csv", "pdf", or "both" (default: "both")
+        
+    Returns:
+        Dictionary with file paths to generated exports
+    """
+    try:
+        logger.info(f"Exporting {len(request.rows)} rows | format={request.format_type}")
+        
+        if not request.rows:
+            raise HTTPException(
+                status_code=400,
+                detail="No data to export"
+            )
+        
+        result = export_results(
+            rows=request.rows,
+            request_id=request.request_id,
+            format_type=request.format_type
+        )
+        
+        logger.info(f"Export completed | files_generated={list(result.keys())}")
+        return result
+        
+    except ValueError as e:
+        logger.error(f"Export validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Export error: {e}")
+        raise HTTPException(status_code=500, detail="Export failed")
+
+@app.get("/exports/{file_path:path}")
+def download_export(file_path: str, authenticated: bool = Depends(require_auth)):
+    """
+    Download an exported file (CSV or PDF).
+    
+    Args:
+        file_path: Path to the file (e.g., "query_123_20240101_120000.csv")
+    """
+    try:
+        # Prevent directory traversal attacks
+        if ".." in file_path or file_path.startswith("/"):
+            logger.warning(f"Invalid file path requested: {file_path}")
+            raise HTTPException(status_code=400, detail="Invalid file path")
+        
+        # Construct full path
+        full_path = Path("exports") / file_path
+        
+        # Verify file exists
+        if not full_path.exists():
+            logger.warning(f"Export file not found: {full_path}")
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Verify it's a safe file type
+        if not (full_path.suffix.lower() in ['.csv', '.pdf']):
+            logger.warning(f"Invalid file type requested: {full_path.suffix}")
+            raise HTTPException(status_code=400, detail="Invalid file type")
+        
+        logger.info(f"Downloading export file: {full_path}")
+        
+        # Determine media type
+        media_type = "text/csv" if full_path.suffix.lower() == ".csv" else "application/pdf"
+        
+        return FileResponse(
+            path=full_path,
+            media_type=media_type,
+            filename=full_path.name
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Download error: {e}")
+        raise HTTPException(status_code=500, detail="Download failed")

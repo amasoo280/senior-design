@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader2, User, Code, AlertCircle, UserCircle, FileText, BarChart3, LogOut } from 'lucide-react';
+import { Send, Loader2, User, Code, AlertCircle, UserCircle, FileText, BarChart3, LogOut, Download, FileJson } from 'lucide-react';
 import { API_ENDPOINTS, DEFAULT_TENANT_ID } from '../config';
 import { getAuthHeaders, logout as authLogout } from '../utils/auth';
 import LogsViewer from './LogsViewer';
 import AnalyticsDashboard from './AnalyticsDashboard';
+import { exportResults } from '../utils/export';
 
 interface Message {
   id: string;
@@ -29,6 +30,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
   const [showLogs, setShowLogs] = useState<boolean>(false);
   const [showAnalytics, setShowAnalytics] = useState<boolean>(false);
+  const [exportingFormat, setExportingFormat] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -188,6 +190,48 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     );
   };
 
+  const handleExport = async (format: 'csv' | 'pdf' | 'both') => {
+    const lastMessage = messages[messages.length - 1];
+    
+    if (!lastMessage || lastMessage.role !== 'assistant' || !lastMessage.data || lastMessage.data.length === 0) {
+      alert('No data to export. Please run a query first.');
+      return;
+    }
+
+    setExportingFormat(format);
+    
+    try {
+      console.log(`Starting export | format=${format} | rows=${lastMessage.data.length}`);
+      
+      const result = await exportResults(
+        lastMessage.data,
+        lastMessage.id,
+        format
+      );
+      
+      console.log('Export result:', result);
+      
+      // Download files with proper blob handling
+      if (result.csv) {
+        const { downloadFile } = await import('../utils/export');
+        await downloadFile(result.csv, `query_${lastMessage.id}.csv`);
+        console.log('CSV downloaded successfully');
+      }
+      
+      if (result.pdf) {
+        const { downloadFile } = await import('../utils/export');
+        await downloadFile(result.pdf, `query_${lastMessage.id}.pdf`);
+        console.log('PDF downloaded successfully');
+      }
+      
+    } catch (error) {
+      console.error('Export error:', error);
+      alert(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen bg-[#0f0f23] text-white">
       {/* Top Bar */}
@@ -314,6 +358,27 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                         <p className="text-sm text-yellow-300">
                           Execution error: {message.executionError}
                         </p>
+                      </div>
+                    )}
+
+                    {message.role === 'assistant' && message.data && message.data.length > 0 && (
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => handleExport('csv')}
+                          disabled={exportingFormat !== null}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 transition-colors text-sm"
+                        >
+                          <FileJson className="w-4 h-4" />
+                          {exportingFormat === 'csv' ? 'Exporting...' : 'CSV'}
+                        </button>
+                        <button
+                          onClick={() => handleExport('pdf')}
+                          disabled={exportingFormat !== null}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-slate-700 transition-colors text-sm"
+                        >
+                          <FileText className="w-4 h-4" />
+                          {exportingFormat === 'pdf' ? 'Exporting...' : 'PDF'}
+                        </button>
                       </div>
                     )}
                   </div>

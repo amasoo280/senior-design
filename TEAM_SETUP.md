@@ -1,7 +1,7 @@
 # Team Update: OAuth Authentication Implementation
 
 **Date**: February 5, 2026  
-**Implemented by**: Mahad  
+**Implemented by**: rushdi  
 **Repository**: https://github.com/amasoo280/senior-design
 
 ---
@@ -254,7 +254,7 @@ Check these files in the repo:
 - `OAUTH_SETUP.md` - Google Cloud Console setup
 - `README.md` - Project overview
 
-Or ask me (Mahad) for help!
+Or ask me (rushdi) for help!
 
 ---
 

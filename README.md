@@ -129,90 +129,149 @@ To make yourself an admin:
 
 ### Backend (.env)
 
-Required:
-- `AWS_ACCESS_KEY_ID` - AWS access key for Bedrock
-- `AWS_SECRET_ACCESS_KEY` - AWS secret key
-- `AWS_REGION` - AWS region (e.g., us-east-1)
-- `DB_HOST` - Database hostname/IP
-- `DB_PORT` - Database port (default: 3306)
-- `DB_NAME` - Database name
-- `DB_USER` - Database username
-- `DB_PASSWORD` - Database password
+```env
+# AWS Bedrock
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_REGION=us-east-1
+BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
 
-Optional:
-- `BEDROCK_MODEL_ID` - Bedrock model (default: Claude 3 Sonnet)
-- `DEFAULT_TENANT_ID` - Default tenant ID for testing
-- `DB_QUERY_TIMEOUT_SECONDS` - Query timeout (default: 30)
+# Database
+DB_HOST=your_database_host
+DB_PORT=3306
+DB_NAME=your_database_name
+DB_USER=your_database_user
+DB_PASSWORD=your_database_password
+
+# Google OAuth
+GOOGLE_CLIENT_ID=your_client_id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your_client_secret
+
+# JWT
+JWT_SECRET_KEY=your_secure_random_key
+JWT_ALGORITHM=HS256
+JWT_EXPIRATION_HOURS=24
+
+# Frontend
+FRONTEND_URL=http://localhost:5173
+
+# Admin (optional)
+ADMIN_EMAILS=admin@example.com
+
+# Other
+DEFAULT_TENANT_ID=your_tenant_id
+```
 
 ### Frontend (.env)
 
-Optional:
-- `VITE_API_BASE_URL` - Backend API URL (default: http://localhost:8000)
-- `VITE_DEFAULT_TENANT_ID` - Default tenant ID (default: "default")
+```env
+VITE_GOOGLE_CLIENT_ID=your_client_id.apps.googleusercontent.com
+VITE_API_BASE_URL=http://localhost:8000
+VITE_DEFAULT_TENANT_ID=your_tenant_id
+```
 
 ## API Endpoints
 
-### POST /ask
+### Authentication
 
-Convert natural language to SQL and optionally execute it.
+- `POST /auth/google` - Exchange Google OAuth token for JWT
+- `GET /auth/me` - Get current user information
+- `POST /auth/logout` - Logout (server-side logging)
+- `GET /auth/verify` - Verify JWT token validity
 
-**Request:**
-```json
-{
-  "query": "What equipment is active at Site A?",
-  "tenant_id": "tenant-123",
-  "execute": true
-}
+### Chatbot
+
+- `POST /ask` - Send a natural language query (requires authentication)
+  - Request: `{ "question": "Show me all equipment" }`
+  - Response: `{ "answer": "...", "sql": "...", "data": [...] }`
+
+### System
+
+- `GET /health` - Health check endpoint
+- `GET /db-ping` - Test database connectivity
+- `GET /logs` - View request logs (requires authentication)
+- `GET /analytics` - View usage analytics (requires authentication)
+
+## How It Works
+
+1. **User Authentication**: Users sign in with Google OAuth
+2. **Backend Verification**: Backend verifies Google token and creates JWT
+3. **Natural Language Input**: User asks a question in plain English
+4. **AI Processing**: Claude 3 Sonnet converts the question to SQL
+5. **SQL Validation**: Safety guardrails check the SQL query
+6. **Database Execution**: Safe queries are executed against MySQL
+7. **Response**: Results are returned and displayed in the UI
+
+## Security Features
+
+- **OAuth 2.0**: Industry-standard authentication with Google
+- **JWT Tokens**: Stateless, secure session management
+- **SQL Injection Prevention**: Parameterized queries and validation
+- **Read-Only Queries**: Only SELECT statements allowed
+- **Tenant Isolation**: Automatic tenant_id filtering
+- **Role-Based Access**: Admin and user roles for future features
+- **CORS Protection**: Restricted to allowed origins
+
+## Project Structure
+
 ```
+backend/
+├── app/
+│   ├── bedrock/         # AWS Bedrock integration
+│   │   └── client.py    # Bedrock client wrapper
+│   ├── executor/        # SQL execution
+│   │   └── executor.py  # Database query executor
+│   ├── safety/          # Security validation
+│   │   └── validator.py # SQL safety checks
+│   ├── schema/          # Database schema
+│   │   └── context.py   # Schema context for AI
+│   ├── models.py        # User database models
+│   ├── database.py      # Database connection
+│   ├── auth.py          # JWT authentication
+│   ├── oauth.py         # Google OAuth
+│   └── config.py        # Configuration management
+├── main.py              # FastAPI application
+├── init_db.py           # Database initialization
+├── requirements.txt     # Python dependencies
+└── env.template         # Environment template
 
-**Response:**
-```json
-{
-  "sql": "SELECT * FROM equipment WHERE status = 'Active' AND location = 'Site A' AND tenant_id = 'tenant-123'",
-  "explanation": "Returns all active equipment at Site A",
-  "natural_language_query": "What equipment is active at Site A?",
-  "tenant_id": "tenant-123",
-  "validated": true,
-  "rows": [...],
-  "row_count": 5,
-  "execution_error": null
-}
+frontend/
+├── src/
+│   ├── components/
+│   │   ├── Dashboard.tsx    # Main UI
+│   │   ├── Login.tsx        # OAuth login
+│   │   ├── ChatInterface.tsx
+│   │   ├── Analytics.tsx
+│   │   └── Logs.tsx
+│   ├── utils/
+│   │   └── auth.ts          # Auth utilities
+│   ├── config.ts            # API config
+│   ├── App.tsx              # Main app
+│   └── main.tsx             # Entry point
+├── package.json
+└── vite.config.ts
 ```
-
-### GET /health
-
-Health check endpoint.
-
-### GET /db-ping
-
-Test database connection.
-
-## Testing
-
-See [backend/TESTING.md](backend/TESTING.md) for detailed testing instructions.
-
-## Project Status
-
-### ✅ Completed
-- Backend API with Bedrock integration
-- SQL executor with database connection
-- Safety guardrails and tenant isolation
-- Frontend UI with API integration
-- Error handling and logging
-
-### 🔄 Next Steps
-- Update schema context with real Sargon Partners schema
-- Add authentication/authorization
-- Improve error messages and UX
-- Add query history persistence
-- Performance optimization
 
 ## Documentation
 
-- [Backend README](backend/README.md) - Detailed backend documentation
-- [Backend Roadmap](backend/ROADMAP.md) - Feature roadmap
-- [Testing Guide](backend/TESTING.md) - Testing instructions
+- **[OAUTH_SETUP.md](OAUTH_SETUP.md)** - Complete guide to setting up Google OAuth
+- **[RUNNING_THE_APP.md](RUNNING_THE_APP.md)** - Step-by-step running instructions
+- **[START_HERE.md](START_HERE.md)** - Original setup guide (pre-OAuth)
+
+## Future Enhancements
+
+- [ ] Per-account database isolation
+- [ ] Enhanced SQL validation
+- [ ] Query result visualization (charts/graphs)
+- [ ] Admin dashboard for user management
+- [ ] Configurable prompts and guardrails
+- [ ] Example/suggested questions
+- [ ] User feedback collection
 
 ## License
 
-This project is for demonstration purposes.
+This is a senior design project for educational purposes.
+
+## Contributors
+
+Senior Design Team - Sargon Partners AI Chatbot

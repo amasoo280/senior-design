@@ -1,9 +1,21 @@
 import logging
+<<<<<<< HEAD
 from typing import Optional, List, Any
 from sqlalchemy.orm import Session
 
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
+=======
+import os
+import secrets
+from datetime import datetime, timedelta
+from typing import Optional, List, Any
+
+from fastapi import FastAPI, HTTPException, Header, Request, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+>>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 from pydantic import BaseModel, Field
 from botocore.exceptions import ClientError
 
@@ -14,7 +26,13 @@ from app.logging.logger import (
     get_logger,
     log_request_start,
     log_request_end,
+<<<<<<< HEAD
     safe_log_sql,
+=======
+    set_request_context,
+    safe_log_sql,
+    safe_truncate,
+>>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 )
 from app.logging import get_logs
 from app.metrics import (
@@ -25,16 +43,23 @@ from app.metrics import (
     increment_chat_count,
     increment_clarification_count,
     record_query_execution_time,
+<<<<<<< HEAD
+=======
+    record_bedrock_call_time,
+>>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 )
 from app.safety.guardrails import SQLGuardrails
 from app.schema.context import SchemaContext
 
+<<<<<<< HEAD
 # OAuth and authentication
 from app.database import init_db, get_db
 from app.auth import get_current_user, require_admin
 from app.oauth import verify_google_token, get_or_create_user
 from app.models import User
 
+=======
+>>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 # Get structured logger for this module
 logger = get_logger(__name__)
 
@@ -44,6 +69,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
+<<<<<<< HEAD
 # Configure CORS - allow frontend URL from settings
 app.add_middleware(
     CORSMiddleware,
@@ -53,6 +79,12 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:5173"
     ],
+=======
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],  # Vite default ports
+>>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -62,6 +94,7 @@ app.add_middleware(
 bedrock_client = BedrockClient()
 schema_context = SchemaContext()
 
+<<<<<<< HEAD
 # Initialize database on startup
 @app.on_event("startup")
 async def startup_event():
@@ -83,6 +116,23 @@ class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: dict
+=======
+# Simple token storage (in production, use Redis or database)
+_active_tokens: dict[str, datetime] = {}
+TOKEN_EXPIRY_HOURS = 24
+
+# Security
+security = HTTPBearer(auto_error=False)
+
+# Request/Response models
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class LoginResponse(BaseModel):
+    token: str
+    expires_at: str
+>>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 
 class AskRequest(BaseModel):
     query: str = Field(..., description="Natural language query")
@@ -105,6 +155,7 @@ def root():
         "name": "Sargon Partners AI Chatbot API",
         "version": "1.0.0",
         "endpoints": {
+<<<<<<< HEAD
             "/auth/google": "POST - Authenticate with Google OAuth",
             "/auth/me": "GET - Get current user info",
             "/auth/logout": "POST - Logout",
@@ -186,6 +237,74 @@ def logout(user: User = Depends(get_current_user)):
 def verify_auth(user: User = Depends(get_current_user)):
     """Verify if current token is valid and return user info."""
     return {"authenticated": True, "user": user.to_dict()}
+=======
+            "/ask": "POST - Convert natural language to SQL",
+            "/health": "GET - Health check",
+            "/db-ping": "GET - Database connection test",
+            "/logs": "GET - View application logs",
+            "/analytics": "GET - Get analytics and metrics"
+        }
+    }
+
+def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> bool:
+    """Verify authentication token."""
+    if not credentials:
+        return False
+    
+    token = credentials.credentials
+    if token not in _active_tokens:
+        return False
+    
+    # Check if token expired
+    if datetime.now() > _active_tokens[token]:
+        del _active_tokens[token]
+        return False
+    
+    return True
+
+def require_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """Dependency to require authentication."""
+    if not verify_token(credentials):
+        raise HTTPException(status_code=401, detail="Unauthorized - Invalid or expired token")
+    return True
+
+@app.post("/login", response_model=LoginResponse)
+def login(request: LoginRequest):
+    """
+    Simple username/password login.
+    
+    Returns a token that should be included in Authorization header for protected endpoints.
+    """
+    # Verify credentials
+    if request.username != settings.auth_username or request.password != settings.auth_password:
+        logger.warning(f"Failed login attempt for username: {request.username}")
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    # Generate token
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now() + timedelta(hours=TOKEN_EXPIRY_HOURS)
+    _active_tokens[token] = expires_at
+    
+    logger.info(f"User '{request.username}' logged in successfully")
+    
+    return LoginResponse(
+        token=token,
+        expires_at=expires_at.isoformat()
+    )
+
+@app.post("/logout")
+def logout(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    """Logout and invalidate token."""
+    if credentials and credentials.credentials in _active_tokens:
+        del _active_tokens[credentials.credentials]
+        logger.info("User logged out")
+    return {"message": "Logged out successfully"}
+
+@app.get("/auth/verify")
+def verify_auth(authenticated: bool = Depends(require_auth)):
+    """Verify if current token is valid."""
+    return {"authenticated": True}
+>>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 
 @app.get("/health")
 def health():
@@ -205,7 +324,11 @@ def db_ping():
 def get_application_logs(
     limit: int = 100,
     level: Optional[str] = None,
+<<<<<<< HEAD
     user: User = Depends(get_current_user)
+=======
+    authenticated: bool = Depends(require_auth)
+>>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 ):
     """
     Get recent application logs for viewing in the web interface.
@@ -229,7 +352,11 @@ def get_application_logs(
     }
 
 @app.get("/analytics")
+<<<<<<< HEAD
 def get_analytics(user: User = Depends(get_current_user)):
+=======
+def get_analytics(authenticated: bool = Depends(require_auth)):
+>>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
     """
     Get analytics and metrics data for the dashboard.
     

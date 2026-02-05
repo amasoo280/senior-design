@@ -1,9 +1,15 @@
 import React, { useState, useEffect } from 'react';
+<<<<<<< HEAD
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
 import { verifyAuth, isAuthenticated } from './utils/auth';
 import { GOOGLE_CLIENT_ID, AUTH_TOKEN_KEY } from './config';
+=======
+import Dashboard from './components/Dashboard';
+import Login from './components/Login';
+import { verifyAuth, isAuthenticated } from './utils/auth';
+>>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 import './index.css';
 
 function App() {
@@ -17,7 +23,11 @@ function App() {
         setIsAuthenticatedState(isValid);
         if (!isValid) {
           // Token is invalid, clear it
+<<<<<<< HEAD
           localStorage.removeItem(AUTH_TOKEN_KEY);
+=======
+          localStorage.removeItem('sargon_auth_token');
+>>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
         }
       }
       setIsCheckingAuth(false);
@@ -42,6 +52,7 @@ function App() {
     );
   }
 
+<<<<<<< HEAD
   return (
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
       {!isAuthenticatedState ? (
@@ -51,6 +62,13 @@ function App() {
       )}
     </GoogleOAuthProvider>
   );
+=======
+  if (!isAuthenticatedState) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  return <Dashboard onLogout={handleLogout} />;
+>>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 }
 
 export default App;

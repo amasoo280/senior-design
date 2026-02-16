@@ -10,7 +10,7 @@ Tracks:
 """
 
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from threading import Lock
 from typing import Dict, List, Any
@@ -36,6 +36,12 @@ _bedrock_call_times: List[float] = []
 _start_time = datetime.now()
 _hourly_requests: Dict[int, int] = defaultdict(int)  # hour -> count
 _hourly_errors: Dict[int, int] = defaultdict(int)  # hour -> count
+
+# Admin: recent request activity (who asked what)
+RECENT_REQUESTS_MAX = 500
+_recent_requests: deque = deque(maxlen=RECENT_REQUESTS_MAX)  # list of dicts
+_requests_by_tenant: Dict[str, int] = defaultdict(int)  # tenant_id -> count
+_pending_requests: Dict[str, Dict[str, Any]] = {}  # request_id -> {tenant_id, query, timestamp}
 
 
 def _get_current_hour() -> int:
@@ -109,6 +115,31 @@ def record_bedrock_call_time(call_time_ms: float) -> None:
         _cleanup_old_data()
 
 
+def record_request_activity(tenant_id: str, query: str, request_id: str) -> None:
+    """Record the start of a request for admin dashboard (who asked what)."""
+    with _metrics_lock:
+        _pending_requests[request_id] = {
+            "tenant_id": tenant_id,
+            "query": query[:200] + ("..." if len(query) > 200 else ""),
+            "timestamp": datetime.now().isoformat(),
+        }
+        _requests_by_tenant[tenant_id] = _requests_by_tenant.get(tenant_id, 0) + 1
+
+
+def record_request_result(request_id: str, success: bool) -> None:
+    """Record the outcome of a request for admin dashboard."""
+    with _metrics_lock:
+        pending = _pending_requests.pop(request_id, None)
+        if pending:
+            _recent_requests.append({
+                "request_id": request_id,
+                "tenant_id": pending["tenant_id"],
+                "query": pending["query"],
+                "timestamp": pending["timestamp"],
+                "success": success,
+            })
+
+
 def get_metrics() -> Dict[str, Any]:
     """
     Get current metrics snapshot.
@@ -149,6 +180,12 @@ def get_metrics() -> Dict[str, Any]:
         
         uptime_seconds = (datetime.now() - _start_time).total_seconds()
         uptime_hours = uptime_seconds / 3600
+
+        # Admin: recent requests (newest first) and requests by tenant
+        recent_list = list(_recent_requests)[-200:][::-1]  # last 200, newest first
+        requests_by_tenant = dict(
+            sorted(_requests_by_tenant.items(), key=lambda x: -x[1])
+        )
         
         return {
             "summary": {
@@ -172,6 +209,8 @@ def get_metrics() -> Dict[str, Any]:
             },
             "hourly": hourly_data,
             "timestamp": datetime.now().isoformat(),
+            "recent_requests": recent_list,
+            "requests_by_tenant": requests_by_tenant,
         }
 
 

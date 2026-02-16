@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
 import Login from './components/Login';
 import { verifyAuth, isAuthenticated } from './utils/auth';
 import './index.css';
@@ -44,7 +46,13 @@ function App() {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
-  return <Dashboard onLogout={handleLogout} />;
+  return (
+    <Routes>
+      <Route path="/" element={<Dashboard onLogout={handleLogout} />} />
+      <Route path="/admin" element={<AnalyticsDashboard />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
 }
 
 export default App;

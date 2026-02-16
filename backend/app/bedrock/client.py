@@ -10,6 +10,7 @@ import boto3
 from botocore.exceptions import ClientError
 from typing import Optional
 
+from app.admin_config import get_prompt_template
 from app.config import settings
 from app.logging.logger import get_logger, log_raw_model_output, set_request_context
 
@@ -36,6 +37,7 @@ class BedrockClient:
 
         self.model_id = settings.bedrock_model_id.strip()
         self.region = settings.aws_region
+        self.logger.info("Bedrock model ID loaded: %s", self.model_id)
 
         self.client = boto3.client(
             "bedrock-runtime",
@@ -91,6 +93,7 @@ class BedrockClient:
         try:
             import time
             start_time = time.time()
+            self.logger.info("Invoking Bedrock now with modelId=%s", self.model_id)
 
             response = self.client.invoke_model(
                 modelId=self.model_id,
@@ -162,49 +165,12 @@ class BedrockClient:
         schema_context: str,
         tenant_id: str,
     ) -> str:
-        return f"""
-You are an AI assistant for an asset-tracking system.
-
-Decide how to respond to the user's message.
-
-Choose ONE mode:
-- chat: greetings or general questions
-- clarification: request is ambiguous or missing details
-- sql: request clearly asks for data
-
-When responding:
-- Be helpful and concise.
-- Use natural language.
-
-CRITICAL OUTPUT RULES:
-- The response MUST be valid JSON.
-- Do NOT include any text outside the JSON object.
-- All string values MUST be single-line.
-- The sql field MUST be a single-line string or null.
-- Do NOT include markdown, code fences, or explanations.
-
-SQL rules (only if mode is sql):
-- Generate a SELECT query only.
-- Use the schema provided.
-- Always filter by accountId = "{tenant_id}".
-
-Return JSON in exactly this format:
-{{
-  "mode": "chat | clarification | sql",
-  "response": "Natural language response",
-  "sql": "SQL query if mode is sql, otherwise null"
-}}
-
-Database schema:
-{schema_context}
-
-User input:
-{natural_language_query}
-
-IMPORTANT:
-Your response must start with '{{' and end with '}}'.
-If you include any text outside the JSON object, the request will fail.
-""".strip()
+        template = get_prompt_template()
+        return template.format(
+            schema_context=schema_context,
+            tenant_id=tenant_id,
+            natural_language_query=natural_language_query,
+        ).strip()
 
     # ==========================================================
     # Response parsing helpers

@@ -3,54 +3,28 @@
 import re
 from typing import Optional
 
+from app.admin_config import get_guardrails_config
+
 
 class SQLGuardrails:
-    """Validates SQL queries for safety and strict tenant isolation."""
-
-    # Explicitly allowed tenant IDs (test database only)
-    ALLOWED_TENANT_IDS = {
-        "c55b3c70-7aa7-11eb-a7e8-9b4baf296adf",
-        "eaeddcf1-fb98-11eb-94c9-b1e578657155",
-    }
-
-    # Dangerous SQL keywords that must never appear
-    DANGEROUS_KEYWORDS = {
-        "INSERT",
-        "UPDATE",
-        "DELETE",
-        "DROP",
-        "ALTER",
-        "CREATE",
-        "TRUNCATE",
-        "EXEC",
-        "EXECUTE",
-        "MERGE",
-        "GRANT",
-        "REVOKE",
-    }
-
-    # SQL injection patterns
-    SQL_INJECTION_PATTERNS = [
-        r"--",                  # Inline comments
-        r"/\*.*?\*/",            # Block comments
-        r";\s*\w+",              # Multiple statements
-        r"\bUNION\b\s+\bSELECT\b",
-        r"\bOR\b\s+1\s*=\s*1",
-    ]
-
-    TENANT_COLUMN = "accountId"
+    """Validates SQL queries for safety and strict tenant isolation. Uses admin-configurable rules."""
 
     def __init__(self, tenant_id: str):
         """
-        Initialize SQL guardrails.
+        Initialize SQL guardrails from current admin config.
 
         Args:
             tenant_id: Tenant ID provided by authenticated context
         """
-        if tenant_id not in self.ALLOWED_TENANT_IDS:
-            raise ValueError(f"Invalid tenant_id: {tenant_id}")
-
+        cfg = get_guardrails_config()
+        self._allowed_tenant_ids = set(cfg.get("allowed_tenant_ids", []))
+        self._dangerous_keywords = set((k or "").strip().upper() for k in cfg.get("dangerous_keywords", []) if k)
+        self._sql_injection_patterns = list(cfg.get("sql_injection_patterns", []))
+        self._tenant_column = (cfg.get("tenant_column") or "accountId").strip()
         self.tenant_id = tenant_id
+
+        if self.tenant_id not in self._allowed_tenant_ids:
+            raise ValueError(f"Invalid tenant_id: {tenant_id}")
 
     def validate_query(self, sql: str) -> tuple[bool, Optional[str]]:
         """
@@ -70,12 +44,12 @@ class SQLGuardrails:
             return False, "Only SELECT queries are allowed"
 
         # 2. Block dangerous keywords anywhere in query
-        for keyword in self.DANGEROUS_KEYWORDS:
-            if re.search(rf"\b{keyword}\b", sql_upper):
+        for keyword in self._dangerous_keywords:
+            if keyword and re.search(rf"\b{re.escape(keyword)}\b", sql_upper):
                 return False, f"Dangerous keyword '{keyword}' is not allowed"
 
         # 3. Detect SQL injection patterns
-        for pattern in self.SQL_INJECTION_PATTERNS:
+        for pattern in self._sql_injection_patterns:
             if re.search(pattern, sql_upper, re.IGNORECASE | re.DOTALL):
                 return False, "Potential SQL injection detected"
 
@@ -97,19 +71,20 @@ class SQLGuardrails:
             (has_isolation, error_message)
         """
         sql_upper = sql.upper()
+        col = self._tenant_column
 
         if "WHERE" not in sql_upper:
             return (
                 False,
-                f"Query must include a WHERE clause filtering on {self.TENANT_COLUMN}",
+                f"Query must include a WHERE clause filtering on {col}",
             )
 
         # Acceptable tenant filter forms
         tenant_patterns = [
-            rf"{self.TENANT_COLUMN}\s*=\s*['\"]{re.escape(self.tenant_id)}['\"]",
-            rf"{self.TENANT_COLUMN}\s*=\s*:{self.TENANT_COLUMN}",
-            rf"{self.TENANT_COLUMN}\s*=\s*\?",
-            rf"{self.TENANT_COLUMN}\s*=\s*%s",
+            rf"{re.escape(col)}\s*=\s*['\"]{re.escape(self.tenant_id)}['\"]",
+            rf"{re.escape(col)}\s*=\s*:{col}",
+            rf"{re.escape(col)}\s*=\s*\?",
+            rf"{re.escape(col)}\s*=\s*%s",
         ]
 
         for pattern in tenant_patterns:
@@ -120,7 +95,7 @@ class SQLGuardrails:
             False,
             (
                 f"Missing or invalid tenant isolation. "
-                f"Query must include: WHERE {self.TENANT_COLUMN} = '{self.tenant_id}'"
+                f"Query must include: WHERE {self._tenant_column} = '{self.tenant_id}'"
             ),
         )
 
@@ -142,7 +117,7 @@ class SQLGuardrails:
 
         # If tenant filter already exists, return as-is
         if re.search(
-            rf"{self.TENANT_COLUMN}\s*=\s*['\"]{re.escape(self.tenant_id)}['\"]",
+            rf"{re.escape(self._tenant_column)}\s*=\s*['\"]{re.escape(self.tenant_id)}['\"]",
             sql_clean,
             re.IGNORECASE,
         ):
@@ -152,7 +127,7 @@ class SQLGuardrails:
         if "WHERE" in sql_upper:
             return re.sub(
                 r"\bWHERE\b",
-                f"WHERE {self.TENANT_COLUMN} = '{self.tenant_id}' AND",
+                f"WHERE {self._tenant_column} = '{self.tenant_id}' AND",
                 sql_clean,
                 count=1,
                 flags=re.IGNORECASE,
@@ -168,8 +143,8 @@ class SQLGuardrails:
             idx = match.start()
             return (
                 sql_clean[:idx]
-                + f" WHERE {self.TENANT_COLUMN} = '{self.tenant_id}' "
+                + f" WHERE {self._tenant_column} = '{self.tenant_id}' "
                 + sql_clean[idx:]
             )
 
-        return sql_clean + f" WHERE {self.TENANT_COLUMN} = '{self.tenant_id}'"
+        return sql_clean + f" WHERE {self._tenant_column} = '{self.tenant_id}'"

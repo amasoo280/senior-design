@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Send, Loader2, User, Code, AlertCircle, UserCircle, FileText, BarChart3, LogOut, Download, FileJson } from 'lucide-react';
 import { API_ENDPOINTS, DEFAULT_TENANT_ID } from '../config';
 import { getAuthHeaders, logout as authLogout } from '../utils/auth';
 import LogsViewer from './LogsViewer';
-import AnalyticsDashboard from './AnalyticsDashboard';
 import { exportResults } from '../utils/export';
 
 interface Message {
@@ -29,7 +29,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
   const [showLogs, setShowLogs] = useState<boolean>(false);
-  const [showAnalytics, setShowAnalytics] = useState<boolean>(false);
   const [exportingFormat, setExportingFormat] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -240,14 +239,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
           <h1 className="text-lg font-semibold text-white">Invisitag Support</h1>
         </div>
         <div className="relative flex items-center gap-2">
-          <button
-            onClick={() => setShowAnalytics(true)}
+          <Link
+            to="/admin"
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
-            title="View Analytics Dashboard"
+            title="View Admin Dashboard"
           >
             <BarChart3 className="w-5 h-5 text-slate-400" />
-            <span className="text-sm text-slate-300">Analytics</span>
-          </button>
+            <span className="text-sm text-slate-300">Admin</span>
+          </Link>
           <button
             onClick={() => setShowLogs(true)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
@@ -448,8 +447,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
       {/* Logs Viewer Modal */}
       {showLogs && <LogsViewer onClose={() => setShowLogs(false)} />}
       
-      {/* Analytics Dashboard Modal */}
-      {showAnalytics && <AnalyticsDashboard onClose={() => setShowAnalytics(false)} />}
     </div>
   );
 };

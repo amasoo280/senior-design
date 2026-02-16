@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -8,6 +10,9 @@ except ImportError:
     from pydantic import BaseSettings
     USE_V2_CONFIG = False
 
+# Load .env from backend directory so it works regardless of cwd
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+_ENV_FILE = _BACKEND_DIR / ".env"
 
 if USE_V2_CONFIG:
     # =============================
@@ -15,7 +20,7 @@ if USE_V2_CONFIG:
     # =============================
     class Settings(BaseSettings):
         model_config = SettingsConfigDict(
-            env_file=".env",
+            env_file=str(_ENV_FILE) if _ENV_FILE.exists() else ".env",
             env_file_encoding="utf-8",
             extra="allow"
         )
@@ -59,7 +64,7 @@ else:
     # =============================
     class Settings(BaseSettings):
         class Config:
-            env_file = ".env"
+            env_file = str(_ENV_FILE) if _ENV_FILE.exists() else ".env"
             env_file_encoding = "utf-8"
             extra = "allow"
 
@@ -95,3 +100,22 @@ else:
 
 
 settings = Settings()
+
+# Startup diagnostic: see exactly what was loaded (helps debug wrong model ID)
+def _config_diagnostic() -> None:
+    import os
+    env_path = str(_ENV_FILE) if _ENV_FILE.exists() else ".env"
+    os_val = os.environ.get("BEDROCK_MODEL_ID")
+    print(
+        "[CONFIG] .env path:",
+        _ENV_FILE,
+        "| exists:",
+        _ENV_FILE.exists(),
+        "| os.environ BEDROCK_MODEL_ID:",
+        repr(os_val) if os_val is not None else "<not set>",
+        "| settings.bedrock_model_id:",
+        repr(settings.bedrock_model_id),
+        flush=True,
+    )
+
+_config_diagnostic()

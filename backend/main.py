@@ -33,7 +33,10 @@ from app.metrics import (
     increment_clarification_count,
     record_query_execution_time,
     record_bedrock_call_time,
+    record_request_activity,
+    record_request_result,
 )
+from app.admin_config import get_config, save_config
 from app.safety.guardrails import SQLGuardrails
 from app.schema.context import SchemaContext
 from app.exporter.export_manager import export_results
@@ -50,7 +53,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],  # Vite default ports
+    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:5174"],  # Vite default ports
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -95,6 +98,32 @@ class ExportRequest(BaseModel):
     rows: List[Dict[str, Any]]
     request_id: str
     format_type: str = "both"  # "csv", "pdf", or "both"
+
+
+class AdminConfigGuardrails(BaseModel):
+    allowed_tenant_ids: List[str] = []
+    dangerous_keywords: List[str] = []
+    sql_injection_patterns: List[str] = []
+    tenant_column: str = "accountId"
+
+
+class AdminConfigRequest(BaseModel):
+    guardrails: AdminConfigGuardrails
+    prompt_template: str = ""
+
+@app.get("/debug-config")
+def debug_config():
+    """Diagnostic: what model ID did this process load? (no auth for debugging)."""
+    import os
+    from app.config import _ENV_FILE
+    return {
+        "env_file_path": str(_ENV_FILE),
+        "env_file_exists": _ENV_FILE.exists(),
+        "os_environ_BEDROCK_MODEL_ID": os.environ.get("BEDROCK_MODEL_ID"),
+        "settings_bedrock_model_id": settings.bedrock_model_id,
+        "bedrock_client_model_id": getattr(bedrock_client, "model_id", None),
+    }
+
 
 @app.get("/")
 def root():
@@ -171,7 +200,11 @@ def verify_auth(authenticated: bool = Depends(require_auth)):
 
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "bedrock_model_id": settings.bedrock_model_id,
+        "bedrock_client_model_id": getattr(bedrock_client, "model_id", None),
+    }
 
 @app.get("/db-ping")
 def db_ping():
@@ -224,6 +257,29 @@ def get_analytics(authenticated: bool = Depends(require_auth)):
     """
     return get_metrics()
 
+
+@app.get("/admin/config")
+def get_admin_config(authenticated: bool = Depends(require_auth)):
+    """Get current guardrails and prompt template for admin editing."""
+    return get_config()
+
+
+@app.post("/admin/config")
+def save_admin_config(
+    request: AdminConfigRequest,
+    authenticated: bool = Depends(require_auth),
+):
+    """Save guardrails and prompt template. Refreshes in-memory config; next query uses new values."""
+    try:
+        save_config({
+            "guardrails": request.guardrails.model_dump(),
+            "prompt_template": request.prompt_template or "",
+        })
+        return {"message": "Config saved successfully"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/ask", response_model=AskResponse)
 async def ask(
     request: AskRequest,
@@ -256,6 +312,7 @@ async def ask(
     # Generate unique request_id and log incoming request
     # This creates a request-scoped logging context for all subsequent logs
     request_id = log_request_start(logger, request.query, tenant_id)
+    record_request_activity(tenant_id, request.query, request_id)
 
     try:
         # Get schema context
@@ -292,6 +349,7 @@ async def ask(
                 increment_clarification_count()
             
             log_request_end(logger, request_id, success=True)
+            record_request_result(request_id, True)
             return AskResponse(
                 sql="",
                 explanation=explanation or response_text or "Chat response",
@@ -308,6 +366,7 @@ async def ask(
             # Log: Warning for unexpected modes
             logger.warning(f"Unexpected mode '{mode}' - treating as non-SQL")
             log_request_end(logger, request_id, success=True)
+            record_request_result(request_id, True)
             return AskResponse(
                 sql="",
                 explanation=explanation or "Unexpected response mode",
@@ -325,6 +384,7 @@ async def ask(
             logger.error("Mode is 'sql' but no SQL was generated")
             increment_error_count("no_sql_generated")
             log_request_end(logger, request_id, success=False, error="No SQL generated in SQL mode")
+            record_request_result(request_id, False)
             raise HTTPException(
                 status_code=500,
                 detail="Bedrock returned SQL mode but no SQL query was generated"
@@ -348,6 +408,7 @@ async def ask(
             logger.warning(f"SQL validation failed: {error_message}")
             increment_error_count("sql_validation_failed")
             log_request_end(logger, request_id, success=False, error=f"SQL validation failed: {error_message}")
+            record_request_result(request_id, False)
             raise HTTPException(
                 status_code=400,
                 detail=f"SQL validation failed: {error_message}"
@@ -394,6 +455,7 @@ async def ask(
 
         # Log: Request completed successfully
         log_request_end(logger, request_id, success=True)
+        record_request_result(request_id, True)
         return AskResponse(**response_data)
 
     except ClientError as aws_exc:
@@ -402,18 +464,21 @@ async def ask(
         logger.error(f"Bedrock API error ({error_code}): {error_message}")
         increment_error_count("bedrock_api_error")
         log_request_end(logger, request_id, success=False, error=f"Bedrock API error: {error_code}")
+        record_request_result(request_id, False)
         raise HTTPException(
             status_code=503,
             detail=f"AWS Bedrock error ({error_code})"
         )
 
     except HTTPException:
+        record_request_result(request_id, False)
         raise
 
     except Exception as e:
         logger.exception(f"Unexpected error processing query: {e}")
         increment_error_count("unexpected_error")
         log_request_end(logger, request_id, success=False, error=str(e))
+        record_request_result(request_id, False)
         raise HTTPException(
             status_code=500,
             detail="Internal server error"

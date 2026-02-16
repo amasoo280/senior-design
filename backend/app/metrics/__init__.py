@@ -9,6 +9,8 @@ from app.metrics.tracker import (
     increment_clarification_count,
     record_query_execution_time,
     record_bedrock_call_time,
+    record_request_activity,
+    record_request_result,
 )
 
 __all__ = [
@@ -20,6 +22,8 @@ __all__ = [
     "increment_clarification_count",
     "record_query_execution_time",
     "record_bedrock_call_time",
+    "record_request_activity",
+    "record_request_result",
 ]
 
 

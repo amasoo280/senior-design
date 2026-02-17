@@ -39,7 +39,6 @@ if USE_V2_CONFIG:
 
         # IMPORTANT:
         # Never hardcode the model ID — ALWAYS read from .env
-        # The .env should contain the *inference profile ID* now.
         bedrock_model_id: str | None = Field(None, env="BEDROCK_MODEL_ID")
 
         # Optional tenant
@@ -48,16 +47,15 @@ if USE_V2_CONFIG:
         # Logging configuration
         log_level: str = Field("INFO", env="LOG_LEVEL")
 
-        # Google OAuth Configuration
-        google_client_id: str = Field(..., env="GOOGLE_CLIENT_ID")
-        google_client_secret: str = Field(..., env="GOOGLE_CLIENT_SECRET")
+        # -----------------------------
+        # Auth0 Configuration
+        # -----------------------------
+        auth0_domain: str = Field(..., env="AUTH0_DOMAIN")
+        auth0_client_id: str = Field(..., env="AUTH0_CLIENT_ID")
+        auth0_client_secret: str | None = Field(None, env="AUTH0_CLIENT_SECRET")
+        auth0_audience: str | None = Field(None, env="AUTH0_AUDIENCE")
         
-        # JWT Configuration
-        jwt_secret_key: str = Field(..., env="JWT_SECRET_KEY")
-        jwt_algorithm: str = Field("HS256", env="JWT_ALGORITHM")
-        jwt_expiration_hours: int = Field(24, env="JWT_EXPIRATION_HOURS")
-        
-        # Frontend URL for OAuth redirects
+        # Frontend URL for CORS
         frontend_url: str = Field("http://localhost:5173", env="FRONTEND_URL")
         
         # Admin emails (comma-separated list)
@@ -98,7 +96,6 @@ else:
         aws_secret_access_key: str | None = None
         aws_region: str | None = "us-east-1"
 
-        # Again, do NOT hardcode — allow .env to override
         bedrock_model_id: str | None = Field(None, env="BEDROCK_MODEL_ID")
 
         default_tenant_id: str | None = None
@@ -106,14 +103,13 @@ else:
         # Logging configuration
         log_level: str = "INFO"
 
-        # Google OAuth Configuration
-        google_client_id: str
-        google_client_secret: str
-        
-        # JWT Configuration
-        jwt_secret_key: str
-        jwt_algorithm: str = "HS256"
-        jwt_expiration_hours: int = 24
+        # -----------------------------
+        # Auth0 Configuration
+        # -----------------------------
+        auth0_domain: str
+        auth0_client_id: str
+        auth0_client_secret: str | None = None
+        auth0_audience: str | None = None
         
         # Frontend URL
         frontend_url: str = "http://localhost:5173"

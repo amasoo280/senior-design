@@ -1,21 +1,11 @@
 import logging
-<<<<<<< HEAD
-from typing import Optional, List, Any
-from sqlalchemy.orm import Session
-
-from fastapi import FastAPI, HTTPException, Header, Depends
-from fastapi.middleware.cors import CORSMiddleware
-=======
-import os
-import secrets
-from datetime import datetime, timedelta
+import json
+import time
 from typing import Optional, List, Any
 
-from fastapi import FastAPI, HTTPException, Header, Request, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
->>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from botocore.exceptions import ClientError
 
@@ -26,13 +16,9 @@ from app.logging.logger import (
     get_logger,
     log_request_start,
     log_request_end,
-<<<<<<< HEAD
-    safe_log_sql,
-=======
     set_request_context,
     safe_log_sql,
     safe_truncate,
->>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 )
 from app.logging import get_logs
 from app.metrics import (
@@ -43,23 +29,14 @@ from app.metrics import (
     increment_chat_count,
     increment_clarification_count,
     record_query_execution_time,
-<<<<<<< HEAD
-=======
     record_bedrock_call_time,
->>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 )
 from app.safety.guardrails import SQLGuardrails
 from app.schema.context import SchemaContext
 
-<<<<<<< HEAD
-# OAuth and authentication
-from app.database import init_db, get_db
-from app.auth import get_current_user, require_admin
-from app.oauth import verify_google_token, get_or_create_user
-from app.models import User
+# Auth0 authentication
+from app.auth import get_current_user, get_optional_user
 
-=======
->>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 # Get structured logger for this module
 logger = get_logger(__name__)
 
@@ -69,7 +46,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-<<<<<<< HEAD
 # Configure CORS - allow frontend URL from settings
 app.add_middleware(
     CORSMiddleware,
@@ -79,12 +55,6 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:5173"
     ],
-=======
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],  # Vite default ports
->>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -94,45 +64,10 @@ app.add_middleware(
 bedrock_client = BedrockClient()
 schema_context = SchemaContext()
 
-<<<<<<< HEAD
-# Initialize database on startup
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database tables on startup."""
-    try:
-        init_db()
-        logger.info("Application startup complete")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
-        raise
 
-# Request/Response models for OAuth
-class GoogleAuthRequest(BaseModel):
-    """Request model for Google OAuth token."""
-    token: str = Field(..., description="Google ID token from frontend")
-
-class AuthResponse(BaseModel):
-    """Response model for successful authentication."""
-    access_token: str
-    token_type: str = "bearer"
-    user: dict
-=======
-# Simple token storage (in production, use Redis or database)
-_active_tokens: dict[str, datetime] = {}
-TOKEN_EXPIRY_HOURS = 24
-
-# Security
-security = HTTPBearer(auto_error=False)
-
-# Request/Response models
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-class LoginResponse(BaseModel):
-    token: str
-    expires_at: str
->>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
+# ============================================
+# Request/Response Models
+# ============================================
 
 class AskRequest(BaseModel):
     query: str = Field(..., description="Natural language query")
@@ -148,6 +83,12 @@ class AskResponse(BaseModel):
     rows: Optional[List[Any]] = None
     row_count: Optional[int] = None
     execution_error: Optional[str] = None
+    validation_status: Optional[str] = None
+    validation_reasoning: Optional[str] = None
+
+# ============================================
+# Root / Health / System Endpoints
+# ============================================
 
 @app.get("/")
 def root():
@@ -155,156 +96,16 @@ def root():
         "name": "Sargon Partners AI Chatbot API",
         "version": "1.0.0",
         "endpoints": {
-<<<<<<< HEAD
-            "/auth/google": "POST - Authenticate with Google OAuth",
-            "/auth/me": "GET - Get current user info",
-            "/auth/logout": "POST - Logout",
+            "/auth/me": "GET - Get current user info (Auth0)",
+            "/auth/verify": "GET - Verify Auth0 token",
             "/ask": "POST - Convert natural language to SQL",
+            "/ask/stream": "POST - Convert natural language to SQL (streaming)",
             "/health": "GET - Health check",
             "/db-ping": "GET - Database connection test",
             "/logs": "GET - View application logs (auth required)",
             "/analytics": "GET - Get analytics and metrics (auth required)"
         }
     }
-
-# ============================================
-# Authentication Endpoints
-# ============================================
-
-@app.post("/auth/google", response_model=AuthResponse)
-async def google_auth(request: GoogleAuthRequest, db: Session = Depends(get_db)):
-    """
-    Authenticate with Google OAuth token.
-    
-    The frontend sends the Google ID token obtained from Google Sign-In.
-    We verify it with Google, create/update the user, and return our JWT token.
-    """
-    # Verify Google token
-    google_user_info = await verify_google_token(request.token)
-    
-    if not google_user_info:
-        logger.warning("Invalid Google token provided")
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid Google token"
-        )
-    
-    # Get or create user
-    try:
-        user = get_or_create_user(db, google_user_info)
-    except Exception as e:
-        logger.error(f"Failed to get/create user: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to create user session"
-        )
-    
-    # Generate JWT token
-    from app.auth import create_access_token
-    access_token = create_access_token(
-        user_id=user.id,
-        email=user.email,
-        role=user.role.value
-    )
-    
-    return AuthResponse(
-        access_token=access_token,
-        token_type="bearer",
-        user=user.to_dict()
-    )
-
-@app.get("/auth/me")
-def get_current_user_info(user: User = Depends(get_current_user)):
-    """
-    Get current authenticated user information.
-    
-    Requires valid JWT token in Authorization header.
-    """
-    return {"user": user.to_dict()}
-
-@app.post("/auth/logout")
-def logout(user: User = Depends(get_current_user)):
-    """
-    Logout current user.
-    
-    Note: With JWT tokens, logout is primarily handled client-side by removing the token.
-    This endpoint is provided for logging purposes and future session management.
-    """
-    logger.info(f"User logged out: {user.email}")
-    return {"message": "Logged out successfully"}
-
-@app.get("/auth/verify")
-def verify_auth(user: User = Depends(get_current_user)):
-    """Verify if current token is valid and return user info."""
-    return {"authenticated": True, "user": user.to_dict()}
-=======
-            "/ask": "POST - Convert natural language to SQL",
-            "/health": "GET - Health check",
-            "/db-ping": "GET - Database connection test",
-            "/logs": "GET - View application logs",
-            "/analytics": "GET - Get analytics and metrics"
-        }
-    }
-
-def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> bool:
-    """Verify authentication token."""
-    if not credentials:
-        return False
-    
-    token = credentials.credentials
-    if token not in _active_tokens:
-        return False
-    
-    # Check if token expired
-    if datetime.now() > _active_tokens[token]:
-        del _active_tokens[token]
-        return False
-    
-    return True
-
-def require_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
-    """Dependency to require authentication."""
-    if not verify_token(credentials):
-        raise HTTPException(status_code=401, detail="Unauthorized - Invalid or expired token")
-    return True
-
-@app.post("/login", response_model=LoginResponse)
-def login(request: LoginRequest):
-    """
-    Simple username/password login.
-    
-    Returns a token that should be included in Authorization header for protected endpoints.
-    """
-    # Verify credentials
-    if request.username != settings.auth_username or request.password != settings.auth_password:
-        logger.warning(f"Failed login attempt for username: {request.username}")
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-    
-    # Generate token
-    token = secrets.token_urlsafe(32)
-    expires_at = datetime.now() + timedelta(hours=TOKEN_EXPIRY_HOURS)
-    _active_tokens[token] = expires_at
-    
-    logger.info(f"User '{request.username}' logged in successfully")
-    
-    return LoginResponse(
-        token=token,
-        expires_at=expires_at.isoformat()
-    )
-
-@app.post("/logout")
-def logout(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
-    """Logout and invalidate token."""
-    if credentials and credentials.credentials in _active_tokens:
-        del _active_tokens[credentials.credentials]
-        logger.info("User logged out")
-    return {"message": "Logged out successfully"}
-
-@app.get("/auth/verify")
-def verify_auth(authenticated: bool = Depends(require_auth)):
-    """Verify if current token is valid."""
-    return {"authenticated": True}
->>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
 
 @app.get("/health")
 def health():
@@ -320,31 +121,50 @@ def db_ping():
         logger.error(f"Database ping failed: {exc}")
         raise HTTPException(status_code=500, detail=f"Database error: {exc}")
 
+
+# ============================================
+# Authentication Endpoints (Auth0)
+# ============================================
+
+@app.get("/auth/me")
+def get_current_user_info(user: dict = Depends(get_current_user)):
+    """
+    Get current authenticated user information.
+    Requires valid Auth0 JWT token in Authorization header.
+    """
+    return {"user": user}
+
+@app.get("/auth/verify")
+def verify_auth(user: dict = Depends(get_current_user)):
+    """Verify if current Auth0 token is valid and return user info."""
+    return {"authenticated": True, "user": user}
+
+@app.post("/auth/logout")
+def logout(user: dict = Depends(get_current_user)):
+    """
+    Logout current user.
+    Note: With Auth0, logout is primarily handled client-side.
+    This endpoint is provided for logging purposes.
+    """
+    logger.info(f"User logged out: {user.get('email', 'unknown')}")
+    return {"message": "Logged out successfully"}
+
+
+# ============================================
+# Logs & Analytics Endpoints
+# ============================================
+
 @app.get("/logs")
 def get_application_logs(
     limit: int = 100,
     level: Optional[str] = None,
-<<<<<<< HEAD
-    user: User = Depends(get_current_user)
-=======
-    authenticated: bool = Depends(require_auth)
->>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
+    user: dict = Depends(get_current_user)
 ):
     """
     Get recent application logs for viewing in the web interface.
-    
-    Args:
-        limit: Maximum number of logs to return (default: 100, max: 500)
-        level: Filter by log level (INFO, WARNING, ERROR, DEBUG) - optional
-        
-    Returns:
-        List of log entries with timestamp, level, module, request_id, tenant_id, and message
     """
-    # Limit max logs to prevent memory issues
     limit = min(limit, 500)
-    
     logs = get_logs(limit=limit, level=level)
-    
     return {
         "logs": logs,
         "count": len(logs),
@@ -352,22 +172,14 @@ def get_application_logs(
     }
 
 @app.get("/analytics")
-<<<<<<< HEAD
-def get_analytics(user: User = Depends(get_current_user)):
-=======
-def get_analytics(authenticated: bool = Depends(require_auth)):
->>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
-    """
-    Get analytics and metrics data for the dashboard.
-    
-    Returns:
-        Dictionary with metrics including:
-        - Summary (total requests, errors, SQL queries, etc.)
-        - Error breakdown by type
-        - Performance metrics (avg execution times)
-        - Hourly request/error trends
-    """
+def get_analytics(user: dict = Depends(get_current_user)):
+    """Get analytics and metrics data for the dashboard."""
     return get_metrics()
+
+
+# ============================================
+# Main Query Endpoint (batch)
+# ============================================
 
 @app.post("/ask", response_model=AskResponse)
 async def ask(
@@ -399,7 +211,6 @@ async def ask(
         )
 
     # Generate unique request_id and log incoming request
-    # This creates a request-scoped logging context for all subsequent logs
     request_id = log_request_start(logger, request.query, tenant_id)
 
     try:
@@ -407,7 +218,6 @@ async def ask(
         schema_context_str = schema_context.get_schema_context()
 
         # Generate response using Bedrock
-        # Log: Track when we call Bedrock API
         logger.info("Calling Bedrock to generate response...")
         bedrock_result = bedrock_client.generate_sql(
             natural_language_query=request.query,
@@ -427,10 +237,8 @@ async def ask(
 
         # Handle non-SQL modes (chat or clarification)
         if mode in ("chat", "clarification"):
-            # Log: Track when we skip SQL processing for chat/clarification
             logger.info(f"Bedrock returned {mode} mode - skipping SQL validation and execution")
             
-            # Track metrics: increment chat/clarification count
             if mode == "chat":
                 increment_chat_count()
             elif mode == "clarification":
@@ -450,7 +258,6 @@ async def ask(
 
         # Only proceed with SQL validation/execution when mode == "sql"
         if mode != "sql":
-            # Log: Warning for unexpected modes
             logger.warning(f"Unexpected mode '{mode}' - treating as non-SQL")
             log_request_end(logger, request_id, success=True)
             return AskResponse(
@@ -466,7 +273,6 @@ async def ask(
 
         # Mode is "sql" - validate that SQL was generated
         if not generated_sql:
-            # Log: Error when SQL mode but no SQL generated
             logger.error("Mode is 'sql' but no SQL was generated")
             increment_error_count("no_sql_generated")
             log_request_end(logger, request_id, success=False, error="No SQL generated in SQL mode")
@@ -475,19 +281,16 @@ async def ask(
                 detail="Bedrock returned SQL mode but no SQL query was generated"
             )
         
-        # Track metrics: SQL query generated (only when we have valid SQL)
-        if generated_sql:
-            increment_sql_query_count()
+        # Track metrics: SQL query generated
+        increment_sql_query_count()
 
-        # Log: Generated SQL (truncated for safety)
-        # This helps debug what SQL was generated before validation
+        # Log generated SQL
         safe_log_sql(logger, logging.INFO, "Generated SQL:", generated_sql)
 
         # Initialize guardrails only for SQL mode
         guardrails = SQLGuardrails(tenant_id)
 
         # Validate SQL
-        # Log: Track SQL validation result (WARNING level for failures)
         is_valid, error_message = guardrails.validate_query(generated_sql)
         if not is_valid:
             logger.warning(f"SQL validation failed: {error_message}")
@@ -498,7 +301,6 @@ async def ask(
                 detail=f"SQL validation failed: {error_message}"
             )
         
-        # Log: SQL validation passed
         logger.info("SQL validation passed")
 
         # Base response for SQL mode
@@ -510,15 +312,15 @@ async def ask(
             "validated": True,
             "rows": None,
             "row_count": None,
-            "execution_error": None
+            "execution_error": None,
+            "validation_status": None,
+            "validation_reasoning": None,
         }
 
         # Execute query if requested (only for SQL mode)
         if request.execute:
-            # Log: Track when we execute SQL
             logger.info("Executing SQL query...")
             try:
-                import time
                 start_time = time.time()
                 rows = execute_query(generated_sql, request_id=request_id)
                 execution_time_ms = (time.time() - start_time) * 1000
@@ -526,12 +328,31 @@ async def ask(
                 # Track metrics: record execution time
                 record_query_execution_time(execution_time_ms)
                 
+                # Filter out cloudUUID from results for cleaner output
+                rows = _filter_cloud_uuids(rows)
+                
                 response_data["rows"] = rows
                 response_data["row_count"] = len(rows)
-                # Log: Track number of rows returned (helps debug query results)
                 logger.info(f"Query executed successfully | rows_returned={len(rows)}")
+                
+                # Data validation through prompting
+                if rows and len(rows) > 0:
+                    try:
+                        validation = bedrock_client.validate_results(
+                            original_query=request.query,
+                            generated_sql=generated_sql,
+                            results=rows[:20],  # Send first 20 rows for validation
+                            tenant_id=tenant_id,
+                        )
+                        response_data["validation_status"] = validation.get("status", "unknown")
+                        response_data["validation_reasoning"] = validation.get("reasoning", "")
+                        logger.info(f"Data validation: {validation.get('status', 'unknown')}")
+                    except Exception as val_err:
+                        logger.warning(f"Data validation failed (non-critical): {val_err}")
+                        response_data["validation_status"] = "skipped"
+                        response_data["validation_reasoning"] = "Validation could not be performed"
+                        
             except DatabaseExecutionError as db_exc:
-                # Log: Execution errors without crashing (ERROR level)
                 error_msg = str(db_exc)
                 logger.error(f"Database execution error: {error_msg}")
                 increment_error_count("database_execution_error")
@@ -563,3 +384,227 @@ async def ask(
             status_code=500,
             detail="Internal server error"
         )
+
+
+# ============================================
+# Streaming Query Endpoint (SSE)
+# ============================================
+
+@app.post("/ask/stream")
+async def ask_stream(
+    request: AskRequest,
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID")
+):
+    """
+    Convert natural language query to SQL and execute it with Server-Sent Events streaming.
+    
+    SSE Events:
+    - thinking: Model's reasoning / progress updates
+    - sql: The generated SQL query
+    - data_row: Individual row of results (streamed one by one)
+    - validation: Data validation result
+    - done: Final completion event
+    - error: Error event
+    """
+    increment_request_count()
+    
+    tenant_id = request.tenant_id or x_tenant_id or settings.default_tenant_id
+    
+    if not tenant_id:
+        increment_error_count("missing_tenant_id")
+        raise HTTPException(
+            status_code=400,
+            detail="Missing tenant_id"
+        )
+    
+    if tenant_id == "default":
+        increment_error_count("invalid_tenant_id")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid tenant_id: 'default' is not allowed."
+        )
+
+    request_id = log_request_start(logger, request.query, tenant_id)
+
+    async def event_stream():
+        """Generator that yields SSE events."""
+        try:
+            # Phase 1: Thinking
+            yield _sse_event("thinking", {"message": "Analyzing your question..."})
+            
+            schema_context_str = schema_context.get_schema_context()
+            
+            yield _sse_event("thinking", {"message": "Generating SQL query from your question..."})
+
+            # Phase 2: Generate SQL
+            bedrock_result = bedrock_client.generate_sql(
+                natural_language_query=request.query,
+                schema_context=schema_context_str,
+                tenant_id=tenant_id,
+                request_id=request_id
+            )
+
+            mode = bedrock_result.get("mode", "sql")
+            response_text = bedrock_result.get("response")
+            generated_sql = bedrock_result.get("sql")
+            explanation = bedrock_result.get("explanation", "Generated response from natural language.")
+
+            # Handle non-SQL modes
+            if mode in ("chat", "clarification"):
+                if mode == "chat":
+                    increment_chat_count()
+                elif mode == "clarification":
+                    increment_clarification_count()
+                
+                yield _sse_event("done", {
+                    "mode": mode,
+                    "message": explanation or response_text or "Chat response",
+                    "sql": "",
+                    "row_count": 0,
+                })
+                log_request_end(logger, request_id, success=True)
+                return
+
+            if mode != "sql" or not generated_sql:
+                yield _sse_event("error", {"message": "Could not generate SQL for this question"})
+                return
+
+            increment_sql_query_count()
+
+            # Validate SQL
+            guardrails = SQLGuardrails(tenant_id)
+            is_valid, error_message = guardrails.validate_query(generated_sql)
+            
+            if not is_valid:
+                increment_error_count("sql_validation_failed")
+                yield _sse_event("error", {"message": f"SQL validation failed: {error_message}"})
+                return
+
+            # Send the SQL
+            yield _sse_event("sql", {
+                "sql": generated_sql,
+                "explanation": explanation,
+            })
+
+            # Phase 3: Execute and stream data
+            if request.execute:
+                yield _sse_event("thinking", {"message": "Executing query against the database..."})
+                
+                try:
+                    start_time = time.time()
+                    rows = execute_query(generated_sql, request_id=request_id)
+                    execution_time_ms = (time.time() - start_time) * 1000
+                    record_query_execution_time(execution_time_ms)
+                    
+                    # Filter out cloudUUID from results
+                    rows = _filter_cloud_uuids(rows)
+                    
+                    # Get column headers from first row
+                    if rows and len(rows) > 0:
+                        columns = list(rows[0].keys())
+                        yield _sse_event("columns", {"columns": columns})
+                        
+                        # Stream rows one by one for dynamic effect
+                        for i, row in enumerate(rows):
+                            yield _sse_event("data_row", {"row": row, "index": i})
+                    
+                    yield _sse_event("thinking", {
+                        "message": f"Query returned {len(rows)} result{'s' if len(rows) != 1 else ''}."
+                    })
+                    
+                    # Phase 4: Data validation
+                    if rows and len(rows) > 0:
+                        yield _sse_event("thinking", {"message": "Validating results match your question..."})
+                        try:
+                            validation = bedrock_client.validate_results(
+                                original_query=request.query,
+                                generated_sql=generated_sql,
+                                results=rows[:20],
+                                tenant_id=tenant_id,
+                            )
+                            yield _sse_event("validation", {
+                                "status": validation.get("status", "unknown"),
+                                "reasoning": validation.get("reasoning", ""),
+                            })
+                        except Exception as val_err:
+                            logger.warning(f"Streaming validation failed: {val_err}")
+                            yield _sse_event("validation", {
+                                "status": "skipped",
+                                "reasoning": "Validation could not be performed",
+                            })
+                    
+                    # Done
+                    yield _sse_event("done", {
+                        "mode": "sql",
+                        "sql": generated_sql,
+                        "row_count": len(rows),
+                        "execution_time_ms": execution_time_ms,
+                    })
+                    
+                except DatabaseExecutionError as db_exc:
+                    yield _sse_event("error", {"message": f"Database error: {str(db_exc)}"})
+            else:
+                yield _sse_event("done", {
+                    "mode": "sql",
+                    "sql": generated_sql,
+                    "row_count": 0,
+                })
+            
+            log_request_end(logger, request_id, success=True)
+
+        except ClientError as aws_exc:
+            error_code = aws_exc.response["Error"]["Code"]
+            error_message_str = aws_exc.response["Error"]["Message"]
+            logger.error(f"Bedrock API error ({error_code}): {error_message_str}")
+            increment_error_count("bedrock_api_error")
+            yield _sse_event("error", {"message": f"AWS Bedrock error: {error_code}"})
+
+        except Exception as e:
+            logger.exception(f"Streaming error: {e}")
+            increment_error_count("unexpected_error")
+            yield _sse_event("error", {"message": "Internal server error"})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+# ============================================
+# Helper Functions
+# ============================================
+
+def _sse_event(event_type: str, data: dict) -> str:
+    """Format a Server-Sent Event."""
+    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+
+def _filter_cloud_uuids(rows: List[dict]) -> List[dict]:
+    """
+    Remove cloudUUID columns from query results to avoid confusing clients.
+    Replace with asset_number using serialNumber or description where available.
+    """
+    if not rows:
+        return rows
+    
+    filtered = []
+    for row in rows:
+        new_row = {}
+        for key, value in row.items():
+            # Skip cloudUUID columns but keep the data accessible via alias
+            if key.lower() == "clouduuid":
+                # Don't include cloudUUID in output
+                continue
+            elif key.lower() in ("accountid",):
+                # Also skip accountId as it's an internal identifier
+                continue
+            else:
+                new_row[key] = value
+        filtered.append(new_row)
+    
+    return filtered

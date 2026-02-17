@@ -1,9 +1,23 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader2, User, Code, AlertCircle, UserCircle, FileText, BarChart3, LogOut } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
+import {
+  Send, Loader2, User, Code, AlertCircle, UserCircle,
+  FileText, BarChart3, LogOut, CheckCircle, AlertTriangle, XCircle, Download
+} from 'lucide-react';
 import { API_ENDPOINTS, DEFAULT_TENANT_ID } from '../config';
-import { getAuthHeaders, logout as authLogout } from '../utils/auth';
+import { getAuthHeadersWithToken } from '../utils/auth';
 import LogsViewer from './LogsViewer';
 import AnalyticsDashboard from './AnalyticsDashboard';
+
+interface StreamEvent {
+  type: string;
+  data: any;
+}
+
+interface ValidationInfo {
+  status: 'valid' | 'partial' | 'mismatch' | 'skipped' | 'pending';
+  reasoning: string;
+}
 
 interface Message {
   id: string;
@@ -13,16 +27,22 @@ interface Message {
   sql?: string;
   explanation?: string;
   data?: any[];
+  columns?: string[];
   rowCount?: number;
   error?: string;
   executionError?: string;
+  isStreaming?: boolean;
+  thinkingSteps?: string[];
+  validation?: ValidationInfo;
 }
 
 interface DashboardProps {
+  getAccessToken: () => Promise<string>;
   onLogout?: () => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
+const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout }) => {
+  const { logout: auth0Logout, user } = useAuth0();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -40,6 +60,155 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     scrollToBottom();
   }, [messages]);
 
+  const handleLogout = async () => {
+    auth0Logout({ logoutParams: { returnTo: window.location.origin } });
+    if (onLogout) onLogout();
+  };
+
+  /**
+   * Handle streaming SSE response from /ask/stream endpoint.
+   * Data is rendered progressively as it arrives.
+   */
+  const handleStreamingSubmit = useCallback(async (query: string) => {
+    const assistantMsgId = (Date.now() + 1).toString();
+
+    // Create initial assistant message in streaming state
+    const streamingMsg: Message = {
+      id: assistantMsgId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      isStreaming: true,
+      thinkingSteps: [],
+      data: [],
+      columns: [],
+    };
+    setMessages(prev => [...prev, streamingMsg]);
+
+    try {
+      const accessToken = await getAccessToken();
+
+      const response = await fetch(API_ENDPOINTS.askStream, {
+        method: 'POST',
+        headers: {
+          ...getAuthHeadersWithToken(accessToken),
+          'X-Tenant-ID': DEFAULT_TENANT_ID || '',
+        },
+        body: JSON.stringify({
+          query: query,
+          tenant_id: DEFAULT_TENANT_ID,
+          execute: true,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No readable stream');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE events from buffer
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || ''; // Keep incomplete event in buffer
+
+        for (const eventStr of events) {
+          if (!eventStr.trim()) continue;
+
+          const lines = eventStr.split('\n');
+          let eventType = '';
+          let eventData = '';
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.slice(7);
+            } else if (line.startsWith('data: ')) {
+              eventData = line.slice(6);
+            }
+          }
+
+          if (!eventType || !eventData) continue;
+
+          try {
+            const data = JSON.parse(eventData);
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.id !== assistantMsgId) return msg;
+
+              const updated = { ...msg };
+
+              switch (eventType) {
+                case 'thinking':
+                  updated.thinkingSteps = [...(updated.thinkingSteps || []), data.message];
+                  updated.content = data.message;
+                  break;
+
+                case 'sql':
+                  updated.sql = data.sql;
+                  updated.explanation = data.explanation;
+                  break;
+
+                case 'columns':
+                  updated.columns = data.columns;
+                  break;
+
+                case 'data_row':
+                  updated.data = [...(updated.data || []), data.row];
+                  updated.rowCount = (updated.data?.length || 0);
+                  break;
+
+                case 'validation':
+                  updated.validation = {
+                    status: data.status,
+                    reasoning: data.reasoning,
+                  };
+                  break;
+
+                case 'done':
+                  updated.isStreaming = false;
+                  updated.rowCount = data.row_count ?? updated.data?.length ?? 0;
+                  if (data.mode !== 'sql' && data.message) {
+                    updated.content = data.message;
+                  } else if (updated.rowCount > 0) {
+                    updated.content = `Found ${updated.rowCount} result${updated.rowCount === 1 ? '' : 's'}.`;
+                  } else if (updated.rowCount === 0 && data.mode === 'sql') {
+                    updated.content = 'The query executed successfully but returned no results.';
+                  }
+                  break;
+
+                case 'error':
+                  updated.isStreaming = false;
+                  updated.error = data.message;
+                  updated.content = `Error: ${data.message}`;
+                  break;
+              }
+
+              return updated;
+            }));
+          } catch (parseErr) {
+            console.error('Failed to parse SSE event:', parseErr);
+          }
+        }
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
+      setMessages(prev => prev.map(msg =>
+        msg.id === assistantMsgId
+          ? { ...msg, isStreaming: false, error: errorMessage, content: `Error: ${errorMessage}` }
+          : msg
+      ));
+    }
+  }, [getAccessToken]);
+
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -52,10 +221,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     };
 
     setMessages(prev => [...prev, userMessage]);
+    const query = input.trim();
     setInput('');
     setIsLoading(true);
 
-    // Validate tenant ID is set
     if (!DEFAULT_TENANT_ID) {
       const errorResponse: Message = {
         id: (Date.now() + 1).toString(),
@@ -69,73 +238,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
       return;
     }
 
-    try {
-      const response = await fetch(API_ENDPOINTS.ask, {
-        method: 'POST',
-        headers: {
-          ...getAuthHeaders(),
-          'X-Tenant-ID': DEFAULT_TENANT_ID,
-        },
-        body: JSON.stringify({
-          query: userMessage.content,
-          tenant_id: DEFAULT_TENANT_ID,
-          execute: true,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // Determine response type: SQL mode (has row_count) vs chat/clarification mode
-      const isSqlMode = data.row_count !== null && data.row_count !== undefined;
-      const hasSql = data.sql && data.sql.trim() !== '';
-
-      // Build appropriate message content based on response type
-      let messageContent: string;
-      if (data.execution_error) {
-        messageContent = `I generated the SQL query, but there was an error executing it: ${data.execution_error}`;
-      } else if (isSqlMode) {
-        // SQL mode response
-        if (data.row_count === 0) {
-          messageContent = 'The query executed successfully but returned no results.';
-        } else {
-          messageContent = `I found ${data.row_count} result${data.row_count === 1 ? '' : 's'}.`;
-        }
-      } else {
-        // Chat or clarification mode - use explanation or a default message
-        messageContent = data.explanation || 'I received your message.';
-      }
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: messageContent,
-        timestamp: new Date().toISOString(),
-        sql: hasSql ? data.sql : undefined,
-        explanation: data.explanation,
-        data: data.rows || [],
-        rowCount: data.row_count ?? 0,
-        error: data.execution_error,
-      };
-
-      setMessages(prev => [...prev, assistantMessage]);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
-      const errorResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: `I encountered an error: ${errorMessage}`,
-        timestamp: new Date().toISOString(),
-        error: errorMessage,
-      };
-      setMessages(prev => [...prev, errorResponse]);
-    } finally {
-      setIsLoading(false);
-    }
+    // Use streaming endpoint
+    await handleStreamingSubmit(query);
+    setIsLoading(false);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -145,8 +250,59 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     }
   };
 
-  const formatDataTable = (data: any[]) => {
-    if (data.length === 0) return null;
+  const exportCSV = (data: any[], filename: string = 'query_results') => {
+    if (!data || data.length === 0) return;
+    const columns = Object.keys(data[0]);
+    const csvRows = [
+      columns.join(','),
+      ...data.map(row =>
+        columns.map(col => {
+          const val = row[col];
+          if (val === null || val === undefined) return '';
+          const str = String(val);
+          return str.includes(',') || str.includes('"') || str.includes('\n')
+            ? `"${str.replace(/"/g, '""')}"`
+            : str;
+        }).join(',')
+      ),
+    ];
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${filename}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const renderValidationBadge = (validation?: ValidationInfo) => {
+    if (!validation || validation.status === 'pending') return null;
+
+    const statusConfig = {
+      valid: { icon: CheckCircle, color: 'text-green-400', bg: 'bg-green-500/10 border-green-500/20', label: 'Validated' },
+      partial: { icon: AlertTriangle, color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/20', label: 'Partial Match' },
+      mismatch: { icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/20', label: 'Mismatch' },
+      skipped: { icon: AlertCircle, color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/20', label: 'Skipped' },
+    };
+
+    const config = statusConfig[validation.status] || statusConfig.skipped;
+    const Icon = config.icon;
+
+    return (
+      <details className="mt-3">
+        <summary className={`cursor-pointer text-sm flex items-center gap-2 p-2 rounded-lg border ${config.bg}`}>
+          <Icon className={`w-4 h-4 ${config.color}`} />
+          <span className={config.color}>Data Validation: {config.label}</span>
+        </summary>
+        {validation.reasoning && (
+          <p className="text-xs text-slate-400 mt-2 px-2">{validation.reasoning}</p>
+        )}
+      </details>
+    );
+  };
+
+  const formatDataTable = (data: any[], isStreaming?: boolean) => {
+    if (!data || data.length === 0) return null;
 
     const columns = Object.keys(data[0]);
     return (
@@ -162,8 +318,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
             </tr>
           </thead>
           <tbody>
-            {data.slice(0, 10).map((row, idx) => (
-              <tr key={idx} className="border-b border-slate-800 hover:bg-slate-800/50">
+            {data.map((row, idx) => (
+              <tr
+                key={idx}
+                className={`border-b border-slate-800 hover:bg-slate-800/50 ${isStreaming && idx === data.length - 1 ? 'animate-pulse' : ''
+                  }`}
+              >
                 {columns.map((col) => (
                   <td key={col} className="py-2 px-3 text-slate-300">
                     {row[col] === null || row[col] === undefined ? (
@@ -179,11 +339,26 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
             ))}
           </tbody>
         </table>
-        {data.length > 10 && (
+        {data.length > 0 && (
           <p className="text-xs text-slate-500 mt-2 px-3">
-            Showing 10 of {data.length} results
+            {isStreaming ? `${data.length} rows loaded...` : `${data.length} total results`}
           </p>
         )}
+      </div>
+    );
+  };
+
+  const renderThinkingSteps = (steps?: string[]) => {
+    if (!steps || steps.length === 0) return null;
+    return (
+      <div className="space-y-1 mb-2">
+        {steps.map((step, idx) => (
+          <div key={idx} className="flex items-center gap-2 text-xs text-slate-500">
+            <div className={`w-1.5 h-1.5 rounded-full ${idx === steps.length - 1 ? 'bg-blue-400 animate-pulse' : 'bg-slate-600'
+              }`} />
+            <span>{step}</span>
+          </div>
+        ))}
       </div>
     );
   };
@@ -216,22 +391,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
             onClick={() => setShowProfileMenu(!showProfileMenu)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
           >
-            <UserCircle className="w-5 h-5 text-slate-400" />
-            <span className="text-sm text-slate-300">Profile</span>
+            {user?.picture ? (
+              <img src={user.picture} alt="" className="w-6 h-6 rounded-full" />
+            ) : (
+              <UserCircle className="w-5 h-5 text-slate-400" />
+            )}
+            <span className="text-sm text-slate-300">{user?.name || 'Profile'}</span>
           </button>
           {showProfileMenu && (
-            <div className="absolute right-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-lg py-1 z-10">
-              <button className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 flex items-center gap-2">
-                <UserCircle className="w-4 h-4" />
-                Account Settings
-              </button>
+            <div className="absolute right-0 top-full mt-1 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-lg py-1 z-10">
+              <div className="px-4 py-2 border-b border-slate-700">
+                <p className="text-sm text-white">{user?.name}</p>
+                <p className="text-xs text-slate-400">{user?.email}</p>
+              </div>
               <button
-                onClick={async () => {
-                  await authLogout();
-                  if (onLogout) {
-                    onLogout();
-                  }
-                }}
+                onClick={handleLogout}
                 className="w-full text-left px-4 py-2 text-sm text-red-300 hover:bg-slate-700 flex items-center gap-2"
               >
                 <LogOut className="w-4 h-4" />
@@ -249,15 +423,25 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
             <div className="text-center py-12">
               <h2 className="text-2xl font-semibold text-slate-300 mb-2">Welcome to Invisitag Support</h2>
               <p className="text-slate-500">Ask me anything about your database</p>
+              <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg mx-auto">
+                {['Show me all equipment', 'How many assets are at each location?', 'List employees and their devices', 'Show recent equipment movements'].map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => { setInput(q); }}
+                    className="text-left text-sm p-3 rounded-lg bg-slate-800/50 border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex gap-4 ${
-                message.role === 'user' ? 'justify-end' : 'justify-start'
-              }`}
+              className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'
+                }`}
             >
               {message.role === 'assistant' && (
                 <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center flex-shrink-0">
@@ -266,18 +450,32 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
               )}
 
               <div
-                className={`max-w-[85%] rounded-2xl px-4 py-3 ${
-                  message.role === 'user'
+                className={`max-w-[85%] rounded-2xl px-4 py-3 ${message.role === 'user'
                     ? 'bg-blue-600 text-white'
                     : 'bg-slate-800 text-slate-200'
-                }`}
+                  }`}
               >
                 {message.role === 'user' ? (
                   <p className="whitespace-pre-wrap">{message.content}</p>
                 ) : (
                   <div className="space-y-3">
-                    <p className="whitespace-pre-wrap">{message.content}</p>
+                    {/* Thinking steps (streaming) */}
+                    {message.isStreaming && renderThinkingSteps(message.thinkingSteps)}
 
+                    {/* Main content */}
+                    {!message.isStreaming && message.content && (
+                      <p className="whitespace-pre-wrap">{message.content}</p>
+                    )}
+
+                    {/* Streaming indicator */}
+                    {message.isStreaming && !message.data?.length && (
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+                        <span className="text-sm text-slate-400">Processing...</span>
+                      </div>
+                    )}
+
+                    {/* Error */}
                     {message.error && (
                       <div className="flex items-start gap-2 p-2 bg-red-500/10 border border-red-500/20 rounded-lg">
                         <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
@@ -285,6 +483,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                       </div>
                     )}
 
+                    {/* SQL */}
                     {message.sql && (
                       <details className="mt-3">
                         <summary className="cursor-pointer text-sm text-slate-400 hover:text-slate-300 flex items-center gap-2">
@@ -292,7 +491,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                           Show SQL
                         </summary>
                         <div className="mt-2 p-3 bg-slate-900/50 rounded-lg border border-slate-700">
-                          <pre className="text-xs text-green-400 font-mono overflow-x-auto">
+                          <pre className="text-xs text-green-400 font-mono overflow-x-auto whitespace-pre-wrap">
                             {message.sql}
                           </pre>
                           {message.explanation && (
@@ -302,12 +501,27 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                       </details>
                     )}
 
+                    {/* Data table (streamed progressively) */}
                     {message.data && message.data.length > 0 && (
                       <div className="mt-3">
-                        {formatDataTable(message.data)}
+                        {formatDataTable(message.data, message.isStreaming)}
+                        {/* CSV Export button */}
+                        {!message.isStreaming && (
+                          <button
+                            onClick={() => exportCSV(message.data!, `query_${message.id}`)}
+                            className="mt-2 flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                          >
+                            <Download className="w-3 h-3" />
+                            Export CSV
+                          </button>
+                        )}
                       </div>
                     )}
 
+                    {/* Data validation badge */}
+                    {renderValidationBadge(message.validation)}
+
+                    {/* Execution error (non-fatal) */}
                     {message.executionError && (
                       <div className="flex items-start gap-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
                         <AlertCircle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
@@ -328,7 +542,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
             </div>
           ))}
 
-          {isLoading && (
+          {isLoading && !messages.some(m => m.isStreaming) && (
             <div className="flex gap-4 justify-start">
               <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center flex-shrink-0">
                 <span className="text-xs">AI</span>
@@ -382,7 +596,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
 
       {/* Logs Viewer Modal */}
       {showLogs && <LogsViewer onClose={() => setShowLogs(false)} />}
-      
+
       {/* Analytics Dashboard Modal */}
       {showAnalytics && <AnalyticsDashboard onClose={() => setShowAnalytics(false)} />}
     </div>

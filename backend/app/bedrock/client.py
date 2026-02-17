@@ -6,9 +6,10 @@ from natural language input.
 import json
 import logging
 import re
+import time
 import boto3
 from botocore.exceptions import ClientError
-from typing import Optional
+from typing import Optional, List
 
 from app.config import settings
 from app.logging.logger import get_logger, log_raw_model_output, set_request_context
@@ -153,6 +154,104 @@ class BedrockClient:
             raise RuntimeError(f"Bedrock API error: {error_msg}") from e
 
     # ==========================================================
+    # Data validation through prompting
+    # ==========================================================
+
+    def validate_results(
+        self,
+        original_query: str,
+        generated_sql: str,
+        results: List[dict],
+        tenant_id: str,
+        max_tokens: int = 1024,
+    ) -> dict:
+        """
+        Validate that the query results actually match the user's original question.
+        
+        This is a second Bedrock call that checks if the returned data
+        is relevant and correct for the question asked.
+        
+        Returns dict with:
+        - status: 'valid' | 'partial' | 'mismatch'
+        - reasoning: explanation of the validation result
+        """
+        # Format results as a readable sample
+        results_sample = json.dumps(results[:10], indent=2, default=str)
+        
+        validation_prompt = f"""
+You are a data validation assistant. Your job is to verify that SQL query results 
+actually answer the user's original question.
+
+Original user question:
+"{original_query}"
+
+Generated SQL:
+{generated_sql}
+
+Query results (first {min(len(results), 10)} rows):
+{results_sample}
+
+Evaluate whether the results correctly and completely answer the user's question.
+
+Consider:
+1. Do the columns returned match what the user asked for?
+2. Do the filter conditions match the user's intent?
+3. Is the data format appropriate for the question?
+4. Are there any obvious errors or missing data?
+
+Return JSON in exactly this format:
+{{
+  "status": "valid | partial | mismatch",
+  "reasoning": "Brief explanation of your assessment"
+}}
+
+Rules:
+- "valid" = results fully answer the question
+- "partial" = results partially answer but may be missing something 
+- "mismatch" = results don't match what was asked
+- Your response MUST be valid JSON only
+- Start with '{{' and end with '}}'
+""".strip()
+
+        body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": max_tokens,
+            "temperature": 0.0,
+            "messages": [
+                {"role": "user", "content": validation_prompt}
+            ],
+        }
+
+        try:
+            start_time = time.time()
+            response = self.client.invoke_model(
+                modelId=self.model_id,
+                body=json.dumps(body),
+                contentType="application/json",
+                accept="application/json",
+            )
+            call_time_ms = (time.time() - start_time) * 1000
+            self.logger.info(f"Validation call completed in {call_time_ms:.0f}ms")
+
+            response_body = json.loads(response["body"].read())
+            text_content = self._extract_text(response_body)
+
+            # Parse the validation JSON
+            match = re.search(r"\{.*\}", text_content, re.DOTALL)
+            if not match:
+                return {"status": "skipped", "reasoning": "Could not parse validation response"}
+
+            result = json.loads(match.group())
+            return {
+                "status": result.get("status", "unknown"),
+                "reasoning": result.get("reasoning", "No reasoning provided"),
+            }
+
+        except Exception as e:
+            self.logger.warning(f"Validation call failed: {e}")
+            return {"status": "skipped", "reasoning": f"Validation error: {str(e)}"}
+
+    # ==========================================================
     # Prompt construction
     # ==========================================================
 
@@ -187,6 +286,12 @@ SQL rules (only if mode is sql):
 - Generate a SELECT query only.
 - Use the schema provided.
 - Always filter by accountId = "{tenant_id}".
+- IMPORTANT: In SELECT columns, use human-friendly identifiers instead of cloudUUID:
+  - Use serialNumber or description to identify assets/tags
+  - If cloudUUID is needed for joins, use it internally but alias it as asset_number in the output
+  - Example: SELECT T.serialNumber AS asset_number, T.description, ... instead of SELECT T.cloudUUID, ...
+  - Do NOT include accountId in the SELECT output columns
+  - Do NOT include cloudUUID as a visible output column
 
 Return JSON in exactly this format:
 {{

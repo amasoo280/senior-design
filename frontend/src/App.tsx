@@ -1,50 +1,14 @@
 import React, { useState, useEffect } from 'react';
-<<<<<<< HEAD
-import { GoogleOAuthProvider } from '@react-oauth/google';
+import { Auth0Provider, useAuth0 } from '@auth0/auth0-react';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
-import { verifyAuth, isAuthenticated } from './utils/auth';
-import { GOOGLE_CLIENT_ID, AUTH_TOKEN_KEY } from './config';
-=======
-import Dashboard from './components/Dashboard';
-import Login from './components/Login';
-import { verifyAuth, isAuthenticated } from './utils/auth';
->>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
+import { AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_AUDIENCE } from './config';
 import './index.css';
 
-function App() {
-  const [isAuthenticatedState, setIsAuthenticatedState] = useState<boolean>(false);
-  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
+function AppContent() {
+  const { isAuthenticated, isLoading, getAccessTokenSilently } = useAuth0();
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      if (isAuthenticated()) {
-        const isValid = await verifyAuth();
-        setIsAuthenticatedState(isValid);
-        if (!isValid) {
-          // Token is invalid, clear it
-<<<<<<< HEAD
-          localStorage.removeItem(AUTH_TOKEN_KEY);
-=======
-          localStorage.removeItem('sargon_auth_token');
->>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
-        }
-      }
-      setIsCheckingAuth(false);
-    };
-
-    checkAuth();
-  }, []);
-
-  const handleLoginSuccess = () => {
-    setIsAuthenticatedState(true);
-  };
-
-  const handleLogout = () => {
-    setIsAuthenticatedState(false);
-  };
-
-  if (isCheckingAuth) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-[#0f0f23] flex items-center justify-center">
         <div className="text-slate-400">Loading...</div>
@@ -52,23 +16,39 @@ function App() {
     );
   }
 
-<<<<<<< HEAD
-  return (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      {!isAuthenticatedState ? (
-        <Login onLoginSuccess={handleLoginSuccess} />
-      ) : (
-        <Dashboard onLogout={handleLogout} />
-      )}
-    </GoogleOAuthProvider>
-  );
-=======
-  if (!isAuthenticatedState) {
-    return <Login onLoginSuccess={handleLoginSuccess} />;
+  if (!isAuthenticated) {
+    return <Login />;
   }
 
-  return <Dashboard onLogout={handleLogout} />;
->>>>>>> 078316479d1a2862d1e450732b847d276ddee3e9
+  return <Dashboard getAccessToken={getAccessTokenSilently} />;
+}
+
+function App() {
+  if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID) {
+    return (
+      <div className="min-h-screen bg-[#0f0f23] flex items-center justify-center">
+        <div className="text-red-400 text-center max-w-md p-6">
+          <h2 className="text-xl font-bold mb-2">Auth0 Not Configured</h2>
+          <p className="text-sm text-slate-400">
+            Set VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID in your frontend .env file.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Auth0Provider
+      domain={AUTH0_DOMAIN}
+      clientId={AUTH0_CLIENT_ID}
+      authorizationParams={{
+        redirect_uri: window.location.origin,
+        audience: AUTH0_AUDIENCE,
+      }}
+    >
+      <AppContent />
+    </Auth0Provider>
+  );
 }
 
 export default App;

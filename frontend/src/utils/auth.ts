@@ -1,5 +1,16 @@
-import { API_ENDPOINTS, AUTH_TOKEN_KEY, USER_INFO_KEY } from '../config';
+/**
+ * Auth utilities for Auth0 integration.
+ * 
+ * Note: Most auth state is managed by Auth0Provider via useAuth0 hook.
+ * These utilities provide helper functions for API calls.
+ */
 
+import { AUTH_TOKEN_KEY, USER_INFO_KEY, API_ENDPOINTS } from '../config';
+
+/**
+ * Get stored auth token (fallback for non-hook contexts).
+ * Prefer using useAuth0().getAccessTokenSilently() in components.
+ */
 export const getAuthToken = (): string | null => {
   return localStorage.getItem(AUTH_TOKEN_KEY);
 };
@@ -17,6 +28,20 @@ export const isAuthenticated = (): boolean => {
   return getAuthToken() !== null;
 };
 
+/**
+ * Build auth headers using a provided access token.
+ * This is the preferred way — pass the token from useAuth0().
+ */
+export const getAuthHeadersWithToken = (accessToken: string): HeadersInit => {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${accessToken}`,
+  };
+};
+
+/**
+ * Build auth headers from localStorage fallback.
+ */
 export const getAuthHeaders = (): HeadersInit => {
   const token = getAuthToken();
   const headers: HeadersInit = {

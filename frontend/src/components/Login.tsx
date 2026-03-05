@@ -20,8 +20,8 @@ const Login: React.FC = () => {
             <p className="text-slate-400 text-sm">Sign in to access the AI chatbot</p>
           </div>
 
-          {/* Error Message */}
-          {error && (
+          {/* Error Message - only show real errors, not redirect artifacts */}
+          {error && !['Unauthorized', 'Login required'].includes(error.message) && (
             <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-2">
               <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
               <p className="text-sm text-red-300">{error.message}</p>

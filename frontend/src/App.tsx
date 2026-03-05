@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Auth0Provider, useAuth0 } from '@auth0/auth0-react';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
-import { AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_AUDIENCE } from './config';
+import { AUTH0_DOMAIN, AUTH0_CLIENT_ID } from './config';
 import './index.css';
 
 function AppContent() {
-  const { isAuthenticated, isLoading, getAccessTokenSilently } = useAuth0();
+  const { isAuthenticated, isLoading, error, getAccessTokenSilently, getIdTokenClaims } = useAuth0();
 
   if (isLoading) {
     return (
@@ -16,11 +16,26 @@ function AppContent() {
     );
   }
 
+  if (error) {
+    console.error('Auth0 error:', error);
+  }
+
   if (!isAuthenticated) {
     return <Login />;
   }
 
-  return <Dashboard getAccessToken={getAccessTokenSilently} />;
+  // Use getIdTokenClaims as fallback when no audience is configured
+  const getToken = async () => {
+    try {
+      return await getAccessTokenSilently();
+    } catch {
+      // When no audience is set, use the ID token instead
+      const claims = await getIdTokenClaims();
+      return claims?.__raw || '';
+    }
+  };
+
+  return <Dashboard getAccessToken={getToken} />;
 }
 
 function App() {
@@ -43,8 +58,8 @@ function App() {
       clientId={AUTH0_CLIENT_ID}
       authorizationParams={{
         redirect_uri: window.location.origin,
-        audience: AUTH0_AUDIENCE,
       }}
+      cacheLocation="localstorage"
     >
       <AppContent />
     </Auth0Provider>

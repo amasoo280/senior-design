@@ -235,5 +235,3 @@ Modify validation rules in `app/safety/guardrails.py` to customize SQL safety ch
 
 This project is for demonstration purposes.
 
-
-

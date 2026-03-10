@@ -161,4 +161,3 @@ Here's an example of how a real schema might look:
 }
 ```
 
-

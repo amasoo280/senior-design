@@ -122,7 +122,3 @@ To test the changes:
 2. Test the `/ask` endpoint
 3. Verify AWS Bedrock inference profile access is enabled
 
-
-
-
-

@@ -180,4 +180,3 @@ After basic testing works:
 4. Test edge cases (empty results, complex queries, etc.)
 5. Add authentication/authorization if needed
 
-

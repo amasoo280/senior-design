@@ -394,3 +394,4 @@ All your existing AI chatbot functionality works with the new auth system!
 ---
 
 **Need help?** Check [OAUTH_SETUP.md](OAUTH_SETUP.md) for detailed Google Cloud Console setup or [walkthrough.md](file:///C:/Users/mahad/.gemini/antigravity/brain/4ed55322-155b-4a41-a615-71c81c186e11/walkthrough.md) for technical details.
+

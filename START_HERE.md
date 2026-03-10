@@ -95,9 +95,9 @@ Once everything is working:
 
 ## Additional Documentation
 
-- **Setup & Requirements:** See `SETUP_REQUIREMENTS.md`
-- **Environment Variables:** See `ENV_FILE_GUIDE.md`
-- **Troubleshooting:** See `TROUBLESHOOTING.md`
-- **Backend Details:** See `backend/README.md`
-- **Testing Guide:** See `backend/TESTING.md`
+- **Setup & Requirements:** See `docs/SETUP_REQUIREMENTS.md`
+- **Environment Variables:** See `docs/ENV_FILE_GUIDE.md`
+- **Troubleshooting:** See `docs/TROUBLESHOOTING.md`
+- **Backend Details:** See `docs/backend/README.md`
+- **Testing Guide:** See `docs/backend/TESTING.md`
 

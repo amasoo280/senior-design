@@ -205,5 +205,3 @@
 - Testing with real AWS Bedrock credentials is essential before proceeding
 - Consider adding a "dry-run" mode for SQL generation without execution
 
-
-

@@ -44,7 +44,7 @@ senior-design/
 
 ### Prerequisites
 
-1. **Google OAuth Credentials**: Follow [OAUTH_SETUP.md](OAUTH_SETUP.md) to set up Google OAuth
+1. **Google OAuth Credentials**: Follow [OAUTH_SETUP.md](docs/OAUTH_SETUP.md) to set up Google OAuth
 2. **AWS Bedrock Access**: AWS account with Bedrock API access
 3. **MySQL Database**: Access to Sargon Partners database
 4. **Python** 3.8+ and **Node.js** 18+
@@ -63,7 +63,7 @@ senior-design/
    # Edit .env with ALL required credentials:
    # - AWS credentials and Bedrock settings
    # - Database credentials  
-   # - Google OAuth Client ID and Secret (from OAUTH_SETUP.md)
+   # - Google OAuth Client ID and Secret (from docs/OAUTH_SETUP.md)
    # - JWT Secret Key (generate with: python -c "import secrets; print(secrets.token_urlsafe(32))")
    # - Admin emails (optional)
    ```
@@ -254,8 +254,8 @@ frontend/
 
 ## Documentation
 
-- **[OAUTH_SETUP.md](OAUTH_SETUP.md)** - Complete guide to setting up Google OAuth
-- **[RUNNING_THE_APP.md](RUNNING_THE_APP.md)** - Step-by-step running instructions
+- **[OAUTH_SETUP.md](docs/OAUTH_SETUP.md)** - Complete guide to setting up Google OAuth
+- **[RUNNING_THE_APP.md](docs/RUNNING_THE_APP.md)** - Step-by-step running instructions
 - **[START_HERE.md](START_HERE.md)** - Original setup guide (pre-OAuth)
 
 ## Future Enhancements

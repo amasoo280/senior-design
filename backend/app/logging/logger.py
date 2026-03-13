@@ -282,24 +282,29 @@ def log_raw_model_output(logger: logging.Logger, raw_output: str) -> None:
     logger.debug(f"Raw model output: {safe_output}")
 
 
-def get_logs(limit: int = 100, level: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_logs(
+    limit: int = 100,
+    level: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """
     Get recent logs from memory buffer.
     
     Args:
         limit: Maximum number of logs to return (default: 100)
         level: Filter by log level (e.g., "INFO", "ERROR") - optional
+        tenant_id: Filter by tenant/account ID - optional
         
     Returns:
         List of log entries (most recent first)
     """
     logs = list(_log_buffer)
     
-    # Filter by level if specified
     if level:
         logs = [log for log in logs if log["level"] == level.upper()]
+    if tenant_id:
+        logs = [log for log in logs if log.get("tenant_id") == tenant_id]
     
-    # Return most recent logs first, limited by count
     return logs[-limit:][::-1]
 
 

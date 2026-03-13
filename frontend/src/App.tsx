@@ -2,11 +2,13 @@ import React from 'react';
 import { Auth0Provider, useAuth0 } from '@auth0/auth0-react';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
+import AdminDashboard from './components/AdminDashboard';
 import { AUTH0_DOMAIN, AUTH0_CLIENT_ID } from './config';
 import './index.css';
 
 function AppContent() {
   const { isAuthenticated, isLoading, error, getAccessTokenSilently, getIdTokenClaims } = useAuth0();
+  const [showAdmin, setShowAdmin] = React.useState(false);
 
   if (isLoading) {
     return (
@@ -35,7 +37,21 @@ function AppContent() {
     }
   };
 
-  return <Dashboard getAccessToken={getToken} />;
+  if (showAdmin) {
+    return (
+      <AdminDashboard
+        getAccessToken={getToken}
+        onClose={() => setShowAdmin(false)}
+      />
+    );
+  }
+
+  return (
+    <Dashboard
+      getAccessToken={getToken}
+      onOpenAdmin={() => setShowAdmin(true)}
+    />
+  );
 }
 
 function App() {

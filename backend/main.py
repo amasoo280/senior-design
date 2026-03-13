@@ -23,6 +23,8 @@ from app.logging.logger import (
 from app.logging import get_logs
 from app.metrics import (
     get_metrics,
+    get_metrics_by_tenant,
+    get_all_tenant_ids,
     increment_request_count,
     increment_error_count,
     increment_sql_query_count,
@@ -35,7 +37,15 @@ from app.safety.guardrails import SQLGuardrails
 from app.schema.context import SchemaContext
 
 # Auth0 authentication
-from app.auth import get_current_user, get_optional_user
+from app.auth import get_current_user, get_optional_user, require_admin
+from app.admin_config import (
+    get_guardrails_config,
+    set_guardrails_config,
+    get_prompt_template,
+    set_prompt_template,
+    get_llm_config,
+    set_llm_config,
+)
 
 # Get structured logger for this module
 logger = get_logger(__name__)
@@ -103,7 +113,14 @@ def root():
             "/health": "GET - Health check",
             "/db-ping": "GET - Database connection test",
             "/logs": "GET - View application logs (auth required)",
-            "/analytics": "GET - Get analytics and metrics (auth required)"
+            "/analytics": "GET - Get analytics and metrics (auth required)",
+            "/admin/config/guardrails": "GET/PUT - Guardrails config (admin)",
+            "/admin/config/prompt": "GET/PUT - LLM prompt template (admin)",
+            "/admin/config/llm": "GET/PUT - LLM params e.g. max_tokens (admin)",
+            "/admin/metrics": "GET - Full metrics + by-tenant (admin)",
+            "/admin/metrics/accounts": "GET - List tenant IDs (admin)",
+            "/admin/metrics/account/{tenant_id}": "GET - Per-account metrics (admin)",
+            "/admin/logs": "GET - Logs, optional tenant_id filter (admin)",
         }
     }
 
@@ -131,8 +148,16 @@ def get_current_user_info(user: dict = Depends(get_current_user)):
     """
     Get current authenticated user information.
     Requires valid Auth0 JWT token in Authorization header.
+    Includes is_admin for frontend to show/hide admin features.
     """
-    return {"user": user}
+    permissions = user.get("permissions", [])
+    email = user.get("email", "unknown")
+    is_admin = (
+        "admin" in permissions
+        or "admin:all" in permissions
+        or (settings.admin_emails and email.lower() in [e.lower().strip() for e in settings.admin_emails])
+    )
+    return {"user": {**user, "is_admin": is_admin}}
 
 @app.get("/auth/verify")
 def verify_auth(user: dict = Depends(get_current_user)):
@@ -158,13 +183,14 @@ def logout(user: dict = Depends(get_current_user)):
 def get_application_logs(
     limit: int = 100,
     level: Optional[str] = None,
+    tenant_id: Optional[str] = None,
     user: dict = Depends(get_current_user)
 ):
     """
     Get recent application logs for viewing in the web interface.
     """
     limit = min(limit, 500)
-    logs = get_logs(limit=limit, level=level)
+    logs = get_logs(limit=limit, level=level, tenant_id=tenant_id)
     return {
         "logs": logs,
         "count": len(logs),
@@ -175,6 +201,110 @@ def get_application_logs(
 def get_analytics(user: dict = Depends(get_current_user)):
     """Get analytics and metrics data for the dashboard."""
     return get_metrics()
+
+
+# ============================================
+# Admin-only Endpoints
+# ============================================
+
+@app.get("/admin/config/guardrails")
+def admin_get_guardrails():
+    """Get current guardrails configuration (TEMP: open during testing)."""
+    return get_guardrails_config()
+
+
+class GuardrailsUpdate(BaseModel):
+    allowed_tenant_ids: Optional[List[str]] = None
+    dangerous_keywords: Optional[List[str]] = None
+    sql_injection_patterns: Optional[List[str]] = None
+    tenant_column: Optional[str] = None
+
+
+@app.put("/admin/config/guardrails")
+def admin_update_guardrails(body: GuardrailsUpdate):
+    """Update guardrails configuration (TEMP: open during testing)."""
+    config = {}
+    if body.allowed_tenant_ids is not None:
+        config["allowed_tenant_ids"] = body.allowed_tenant_ids
+    if body.dangerous_keywords is not None:
+        config["dangerous_keywords"] = body.dangerous_keywords
+    if body.sql_injection_patterns is not None:
+        config["sql_injection_patterns"] = body.sql_injection_patterns
+    if body.tenant_column is not None:
+        config["tenant_column"] = body.tenant_column
+    return set_guardrails_config(config)
+
+
+@app.get("/admin/config/prompt")
+def admin_get_prompt():
+    """Get current LLM prompt template (TEMP: open during testing). None = use built-in."""
+    return {"prompt_template": get_prompt_template()}
+
+
+class PromptUpdate(BaseModel):
+    prompt_template: Optional[str] = None
+
+
+@app.put("/admin/config/prompt")
+def admin_update_prompt(body: PromptUpdate):
+    """Update LLM prompt template (TEMP: open during testing). Set to null/empty to use built-in."""
+    set_prompt_template(body.prompt_template if body.prompt_template else None)
+    return {"prompt_template": get_prompt_template()}
+
+
+@app.get("/admin/config/llm")
+def admin_get_llm():
+    """Get LLM parameters: max_tokens, temperature, etc. (TEMP: open during testing)."""
+    return get_llm_config()
+
+
+class LLMUpdate(BaseModel):
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+    validation_max_tokens: Optional[int] = None
+
+
+@app.put("/admin/config/llm")
+def admin_update_llm(body: LLMUpdate):
+    """Update LLM parameters (TEMP: open during testing)."""
+    config = {}
+    if body.max_tokens is not None:
+        config["max_tokens"] = body.max_tokens
+    if body.temperature is not None:
+        config["temperature"] = body.temperature
+    if body.validation_max_tokens is not None:
+        config["validation_max_tokens"] = body.validation_max_tokens
+    return set_llm_config(config)
+
+
+@app.get("/admin/metrics")
+def admin_get_metrics():
+    """Get full metrics including totals and per-tenant breakdown (TEMP: open during testing)."""
+    return get_metrics()
+
+
+@app.get("/admin/metrics/accounts")
+def admin_list_accounts():
+    """List tenant IDs that have metrics (TEMP: open during testing)."""
+    return {"tenant_ids": get_all_tenant_ids()}
+
+
+@app.get("/admin/metrics/account/{tenant_id}")
+def admin_get_account_metrics(tenant_id: str):
+    """Get metrics for a specific account/tenant (TEMP: open during testing)."""
+    return get_metrics_by_tenant(tenant_id)
+
+
+@app.get("/admin/logs")
+def admin_get_logs(
+    limit: int = 200,
+    level: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+):
+    """Get application logs, optionally filtered by tenant (TEMP: open during testing)."""
+    limit = min(limit, 500)
+    logs = get_logs(limit=limit, level=level, tenant_id=tenant_id)
+    return {"logs": logs, "count": len(logs)}
 
 
 # ============================================
@@ -189,14 +319,14 @@ async def ask(
     """
     Convert natural language query to SQL and optionally execute it.
     """
-    # Track metrics: increment request count (track ALL requests, even failed ones)
-    increment_request_count()
-    
     # Determine tenant_id from request body, header, or env (NO literal "default" fallback)
     tenant_id = request.tenant_id or x_tenant_id or settings.default_tenant_id
     
+    # Track metrics: increment request count (track ALL requests, even failed ones)
+    increment_request_count(tenant_id)
+    
     if not tenant_id:
-        increment_error_count("missing_tenant_id")
+        increment_error_count("missing_tenant_id", tenant_id)
         raise HTTPException(
             status_code=400,
             detail="Missing tenant_id (accountId). Provide it in request body, X-Tenant-ID header, or set DEFAULT_TENANT_ID in .env"
@@ -204,7 +334,7 @@ async def ask(
     
     # Reject literal "default" string
     if tenant_id == "default":
-        increment_error_count("invalid_tenant_id")
+        increment_error_count("invalid_tenant_id", tenant_id)
         raise HTTPException(
             status_code=400,
             detail="Invalid tenant_id: 'default' is not allowed. Provide a valid tenant ID."
@@ -240,9 +370,9 @@ async def ask(
             logger.info(f"Bedrock returned {mode} mode - skipping SQL validation and execution")
             
             if mode == "chat":
-                increment_chat_count()
+                increment_chat_count(tenant_id)
             elif mode == "clarification":
-                increment_clarification_count()
+                increment_clarification_count(tenant_id)
             
             log_request_end(logger, request_id, success=True)
             return AskResponse(
@@ -274,7 +404,7 @@ async def ask(
         # Mode is "sql" - validate that SQL was generated
         if not generated_sql:
             logger.error("Mode is 'sql' but no SQL was generated")
-            increment_error_count("no_sql_generated")
+            increment_error_count("no_sql_generated", tenant_id)
             log_request_end(logger, request_id, success=False, error="No SQL generated in SQL mode")
             raise HTTPException(
                 status_code=500,
@@ -282,7 +412,7 @@ async def ask(
             )
         
         # Track metrics: SQL query generated
-        increment_sql_query_count()
+        increment_sql_query_count(tenant_id)
 
         # Log generated SQL
         safe_log_sql(logger, logging.INFO, "Generated SQL:", generated_sql)
@@ -294,7 +424,7 @@ async def ask(
         is_valid, error_message = guardrails.validate_query(generated_sql)
         if not is_valid:
             logger.warning(f"SQL validation failed: {error_message}")
-            increment_error_count("sql_validation_failed")
+            increment_error_count("sql_validation_failed", tenant_id)
             log_request_end(logger, request_id, success=False, error=f"SQL validation failed: {error_message}")
             raise HTTPException(
                 status_code=400,
@@ -355,7 +485,7 @@ async def ask(
             except DatabaseExecutionError as db_exc:
                 error_msg = str(db_exc)
                 logger.error(f"Database execution error: {error_msg}")
-                increment_error_count("database_execution_error")
+                increment_error_count("database_execution_error", tenant_id)
                 response_data["execution_error"] = error_msg
 
         # Log: Request completed successfully
@@ -366,7 +496,7 @@ async def ask(
         error_code = aws_exc.response["Error"]["Code"]
         error_message = aws_exc.response["Error"]["Message"]
         logger.error(f"Bedrock API error ({error_code}): {error_message}")
-        increment_error_count("bedrock_api_error")
+        increment_error_count("bedrock_api_error", tenant_id)
         log_request_end(logger, request_id, success=False, error=f"Bedrock API error: {error_code}")
         raise HTTPException(
             status_code=503,
@@ -378,7 +508,7 @@ async def ask(
 
     except Exception as e:
         logger.exception(f"Unexpected error processing query: {e}")
-        increment_error_count("unexpected_error")
+        increment_error_count("unexpected_error", tenant_id)
         log_request_end(logger, request_id, success=False, error=str(e))
         raise HTTPException(
             status_code=500,
@@ -406,19 +536,18 @@ async def ask_stream(
     - done: Final completion event
     - error: Error event
     """
-    increment_request_count()
-    
     tenant_id = request.tenant_id or x_tenant_id or settings.default_tenant_id
+    increment_request_count(tenant_id)
     
     if not tenant_id:
-        increment_error_count("missing_tenant_id")
+        increment_error_count("missing_tenant_id", tenant_id)
         raise HTTPException(
             status_code=400,
             detail="Missing tenant_id"
         )
     
     if tenant_id == "default":
-        increment_error_count("invalid_tenant_id")
+        increment_error_count("invalid_tenant_id", tenant_id)
         raise HTTPException(
             status_code=400,
             detail="Invalid tenant_id: 'default' is not allowed."
@@ -429,20 +558,26 @@ async def ask_stream(
     async def event_stream():
         """Generator that yields SSE events."""
         try:
-            # Phase 1: Thinking
-            yield _sse_event("thinking", {"message": "Analyzing your question..."})
-            
             schema_context_str = schema_context.get_schema_context()
-            
-            yield _sse_event("thinking", {"message": "Generating SQL query from your question..."})
+            yield _sse_event("thinking", {"message": "Analyzing your question..."})
 
-            # Phase 2: Generate SQL
-            bedrock_result = bedrock_client.generate_sql(
+            # Phase 2: Generate SQL using streaming Bedrock thinking
+            bedrock_result = None
+            for event in bedrock_client.generate_sql_stream(
                 natural_language_query=request.query,
                 schema_context=schema_context_str,
                 tenant_id=tenant_id,
-                request_id=request_id
-            )
+                request_id=request_id,
+            ):
+                if event.get("event") == "thinking":
+                    yield _sse_event("thinking", {"message": event.get("text", "")})
+                elif event.get("event") == "final":
+                    bedrock_result = event.get("result")
+
+            if bedrock_result is None:
+                increment_error_count("bedrock_streaming_error", tenant_id)
+                yield _sse_event("error", {"message": "Model did not return a valid response"})
+                return
 
             mode = bedrock_result.get("mode", "sql")
             response_text = bedrock_result.get("response")
@@ -452,9 +587,9 @@ async def ask_stream(
             # Handle non-SQL modes
             if mode in ("chat", "clarification"):
                 if mode == "chat":
-                    increment_chat_count()
+                    increment_chat_count(tenant_id)
                 elif mode == "clarification":
-                    increment_clarification_count()
+                    increment_clarification_count(tenant_id)
                 
                 yield _sse_event("done", {
                     "mode": mode,
@@ -469,14 +604,14 @@ async def ask_stream(
                 yield _sse_event("error", {"message": "Could not generate SQL for this question"})
                 return
 
-            increment_sql_query_count()
+            increment_sql_query_count(tenant_id)
 
             # Validate SQL
             guardrails = SQLGuardrails(tenant_id)
             is_valid, error_message = guardrails.validate_query(generated_sql)
             
             if not is_valid:
-                increment_error_count("sql_validation_failed")
+                increment_error_count("sql_validation_failed", tenant_id)
                 yield _sse_event("error", {"message": f"SQL validation failed: {error_message}"})
                 return
 
@@ -556,12 +691,12 @@ async def ask_stream(
             error_code = aws_exc.response["Error"]["Code"]
             error_message_str = aws_exc.response["Error"]["Message"]
             logger.error(f"Bedrock API error ({error_code}): {error_message_str}")
-            increment_error_count("bedrock_api_error")
+            increment_error_count("bedrock_api_error", tenant_id)
             yield _sse_event("error", {"message": f"AWS Bedrock error: {error_code}"})
 
         except Exception as e:
             logger.exception(f"Streaming error: {e}")
-            increment_error_count("unexpected_error")
+            increment_error_count("unexpected_error", tenant_id)
             yield _sse_event("error", {"message": "Internal server error"})
 
     return StreamingResponse(
@@ -586,8 +721,12 @@ def _sse_event(event_type: str, data: dict) -> str:
 
 def _filter_cloud_uuids(rows: List[dict]) -> List[dict]:
     """
-    Remove cloudUUID columns from query results to avoid confusing clients.
-    Replace with asset_number using serialNumber or description where available.
+    Remove UUID-style and internal identifier columns from query results to
+    avoid confusing clients or exposing low-level identifiers.
+
+    Any column whose name contains 'uuid' (case-insensitive), and accountId,
+    are stripped from the visible results. The model can still use these
+    fields internally in SQL for joins and filters.
     """
     if not rows:
         return rows
@@ -596,15 +735,13 @@ def _filter_cloud_uuids(rows: List[dict]) -> List[dict]:
     for row in rows:
         new_row = {}
         for key, value in row.items():
-            # Skip cloudUUID columns but keep the data accessible via alias
-            if key.lower() == "clouduuid":
-                # Don't include cloudUUID in output
+            key_lower = key.lower()
+            # Skip any UUID-style identifiers and internal tenant identifiers
+            if "uuid" in key_lower:
                 continue
-            elif key.lower() in ("accountid",):
-                # Also skip accountId as it's an internal identifier
+            if key_lower == "accountid":
                 continue
-            else:
-                new_row[key] = value
+            new_row[key] = value
         filtered.append(new_row)
     
     return filtered

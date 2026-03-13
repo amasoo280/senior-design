@@ -13,7 +13,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from threading import Lock
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 # Thread-safe metrics storage
 _metrics_lock = Lock()
@@ -27,6 +27,16 @@ _total_clarification_responses = 0
 
 # Error tracking by type
 _error_counts: Dict[str, int] = defaultdict(int)
+
+# Per-tenant counters (tenant_id -> counts)
+_by_tenant: Dict[str, Dict[str, int]] = defaultdict(lambda: {
+    "requests": 0,
+    "errors": 0,
+    "sql_queries": 0,
+    "chat_responses": 0,
+    "clarification_responses": 0,
+})
+_by_tenant_errors: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
 # Performance metrics
 _query_execution_times: List[float] = []
@@ -55,44 +65,80 @@ def _cleanup_old_data():
         _bedrock_call_times = _bedrock_call_times[-1000:]
 
 
-def increment_request_count() -> None:
-    """Increment total request counter."""
+def increment_request_count(tenant_id: Optional[str] = None) -> None:
+    """Increment total request counter and optionally per-tenant."""
     global _total_requests
     with _metrics_lock:
         _total_requests += 1
         hour = _get_current_hour()
         _hourly_requests[hour] += 1
+        if tenant_id:
+            _by_tenant[tenant_id]["requests"] += 1
 
 
-def increment_error_count(error_type: str = "unknown") -> None:
-    """Increment error counter and track error type."""
+def increment_error_count(error_type: str = "unknown", tenant_id: Optional[str] = None) -> None:
+    """Increment error counter and track error type; optionally per-tenant."""
     global _total_errors
     with _metrics_lock:
         _total_errors += 1
         _error_counts[error_type] += 1
         hour = _get_current_hour()
         _hourly_errors[hour] += 1
+        if tenant_id:
+            _by_tenant[tenant_id]["errors"] += 1
+            _by_tenant_errors[tenant_id][error_type] += 1
 
 
-def increment_sql_query_count() -> None:
-    """Increment SQL query counter."""
+def increment_sql_query_count(tenant_id: Optional[str] = None) -> None:
+    """Increment SQL query counter; optionally per-tenant."""
     global _total_sql_queries
     with _metrics_lock:
         _total_sql_queries += 1
+        if tenant_id:
+            _by_tenant[tenant_id]["sql_queries"] += 1
 
 
-def increment_chat_count() -> None:
-    """Increment chat response counter."""
+def increment_chat_count(tenant_id: Optional[str] = None) -> None:
+    """Increment chat response counter; optionally per-tenant."""
     global _total_chat_responses
     with _metrics_lock:
         _total_chat_responses += 1
+        if tenant_id:
+            _by_tenant[tenant_id]["chat_responses"] += 1
 
 
-def increment_clarification_count() -> None:
-    """Increment clarification response counter."""
+def increment_clarification_count(tenant_id: Optional[str] = None) -> None:
+    """Increment clarification response counter; optionally per-tenant."""
     global _total_clarification_responses
     with _metrics_lock:
         _total_clarification_responses += 1
+        if tenant_id:
+            _by_tenant[tenant_id]["clarification_responses"] += 1
+
+
+def get_metrics_by_tenant(tenant_id: str) -> Dict[str, Any]:
+    """Get metrics for a single tenant/account."""
+    with _metrics_lock:
+        t = _by_tenant.get(tenant_id, defaultdict(int))
+        errors_by_type = dict(_by_tenant_errors.get(tenant_id, {}))
+        requests = t.get("requests", 0)
+        errors = t.get("errors", 0)
+        return {
+            "tenant_id": tenant_id,
+            "requests": requests,
+            "errors": errors,
+            "sql_queries": t.get("sql_queries", 0),
+            "chat_responses": t.get("chat_responses", 0),
+            "clarification_responses": t.get("clarification_responses", 0),
+            "success_rate": round(((requests - errors) / requests * 100), 2) if requests > 0 else 0,
+            "errors_by_type": errors_by_type,
+        }
+
+
+def get_all_tenant_ids() -> List[str]:
+    """Return list of tenant IDs that have at least one request."""
+    with _metrics_lock:
+        return list(_by_tenant.keys())
 
 
 def record_query_execution_time(execution_time_ms: float) -> None:
@@ -150,6 +196,19 @@ def get_metrics() -> Dict[str, Any]:
         uptime_seconds = (datetime.now() - _start_time).total_seconds()
         uptime_hours = uptime_seconds / 3600
         
+        by_tenant_summary = {
+            tid: {
+                "requests": data["requests"],
+                "errors": data["errors"],
+                "sql_queries": data["sql_queries"],
+                "chat_responses": data["chat_responses"],
+                "clarification_responses": data["clarification_responses"],
+                "success_rate": round(
+                    ((data["requests"] - data["errors"]) / data["requests"] * 100), 2
+                ) if data["requests"] > 0 else 0,
+            }
+            for tid, data in _by_tenant.items()
+        }
         return {
             "summary": {
                 "total_requests": _total_requests,
@@ -171,6 +230,7 @@ def get_metrics() -> Dict[str, Any]:
                 "bedrock_call_samples": len(_bedrock_call_times),
             },
             "hourly": hourly_data,
+            "by_tenant": by_tenant_summary,
             "timestamp": datetime.now().isoformat(),
         }
 

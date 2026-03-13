@@ -20,6 +20,15 @@ export const API_ENDPOINTS = {
   dbPing: `${API_BASE_URL}/db-ping`,
   logs: `${API_BASE_URL}/logs`,
   analytics: `${API_BASE_URL}/analytics`,
+
+  // Admin (require admin role)
+  adminConfigGuardrails: `${API_BASE_URL}/admin/config/guardrails`,
+  adminConfigPrompt: `${API_BASE_URL}/admin/config/prompt`,
+  adminConfigLlm: `${API_BASE_URL}/admin/config/llm`,
+  adminMetrics: `${API_BASE_URL}/admin/metrics`,
+  adminMetricsAccounts: `${API_BASE_URL}/admin/metrics/accounts`,
+  adminMetricsAccount: (tenantId: string) => `${API_BASE_URL}/admin/metrics/account/${encodeURIComponent(tenantId)}`,
+  adminLogs: `${API_BASE_URL}/admin/logs`,
 } as const;
 
 // Default tenant ID (for development)

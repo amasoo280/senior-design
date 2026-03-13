@@ -2,12 +2,13 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import {
   Send, Loader2, User, Code, AlertCircle, UserCircle,
-  FileText, BarChart3, LogOut, CheckCircle, AlertTriangle, XCircle, Download
+  FileText, BarChart3, LogOut, CheckCircle, AlertTriangle, XCircle, Download, Shield
 } from 'lucide-react';
 import { API_ENDPOINTS, DEFAULT_TENANT_ID } from '../config';
 import { getAuthHeadersWithToken } from '../utils/auth';
 import LogsViewer from './LogsViewer';
 import AnalyticsDashboard from './AnalyticsDashboard';
+import AdminDashboard from './AdminDashboard';
 
 interface StreamEvent {
   type: string;
@@ -39,9 +40,10 @@ interface Message {
 interface DashboardProps {
   getAccessToken: () => Promise<string>;
   onLogout?: () => void;
+  onOpenAdmin?: () => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout }) => {
+const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenAdmin }) => {
   const { logout: auth0Logout, user } = useAuth0();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>('');
@@ -49,6 +51,8 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout }) => {
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
   const [showLogs, setShowLogs] = useState<boolean>(false);
   const [showAnalytics, setShowAnalytics] = useState<boolean>(false);
+  // During testing, treat all logged-in users as admin so the Admin dashboard is always visible.
+  const [isAdmin, setIsAdmin] = useState<boolean>(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -59,6 +63,9 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout }) => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // NOTE: In production, this effect should call /auth/me to compute isAdmin from the backend.
+  // For now (testing), we skip it and rely on isAdmin defaulting to true.
 
   const handleLogout = async () => {
     auth0Logout({ logoutParams: { returnTo: window.location.origin } });
@@ -148,8 +155,10 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout }) => {
 
               switch (eventType) {
                 case 'thinking':
+                  // Accumulate thinking text so the user sees one continuous
+                  // streaming paragraph, similar to typical chat UIs.
                   updated.thinkingSteps = [...(updated.thinkingSteps || []), data.message];
-                  updated.content = data.message;
+                  updated.content = (updated.content || '') + data.message;
                   break;
 
                 case 'sql':
@@ -350,15 +359,14 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout }) => {
 
   const renderThinkingSteps = (steps?: string[]) => {
     if (!steps || steps.length === 0) return null;
+    // Join all thinking chunks into a single continuous paragraph so it
+    // feels like a normal LLM streaming response instead of bullet points.
+    const fullThought = steps.join('');
     return (
-      <div className="space-y-1 mb-2">
-        {steps.map((step, idx) => (
-          <div key={idx} className="flex items-center gap-2 text-xs text-slate-500">
-            <div className={`w-1.5 h-1.5 rounded-full ${idx === steps.length - 1 ? 'bg-blue-400 animate-pulse' : 'bg-slate-600'
-              }`} />
-            <span>{step}</span>
-          </div>
-        ))}
+      <div className="mb-1">
+        <p className="whitespace-pre-wrap text-xs text-slate-500/90 italic">
+          {fullThought}
+        </p>
       </div>
     );
   };
@@ -387,6 +395,16 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout }) => {
             <FileText className="w-5 h-5 text-slate-400" />
             <span className="text-sm text-slate-300">Logs</span>
           </button>
+          {isAdmin && (
+            <button
+              onClick={() => onOpenAdmin && onOpenAdmin()}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+              title="Admin Dashboard"
+            >
+              <Shield className="w-5 h-5 text-amber-400" />
+              <span className="text-sm text-slate-300">Admin</span>
+            </button>
+          )}
           <button
             onClick={() => setShowProfileMenu(!showProfileMenu)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
@@ -465,6 +483,18 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout }) => {
                     {/* Main content */}
                     {!message.isStreaming && message.content && (
                       <p className="whitespace-pre-wrap">{message.content}</p>
+                    )}
+
+                    {/* Post-result thinking viewer */}
+                    {!message.isStreaming && message.thinkingSteps && message.thinkingSteps.length > 0 && (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-[11px] text-slate-500 hover:text-slate-300">
+                          Show model thinking
+                        </summary>
+                        <div className="mt-1">
+                          {renderThinkingSteps(message.thinkingSteps)}
+                        </div>
+                      </details>
                     )}
 
                     {/* Streaming indicator */}

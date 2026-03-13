@@ -28,8 +28,8 @@ class SchemaContext:
         parts.append("")
         parts.append("DISPLAY RULES:")
         parts.append("- Use serialNumber or description as the primary asset identifier in output")
-        parts.append("- Do NOT display cloudUUID or accountId in SELECT output columns")
-        parts.append("- If cloudUUID is needed for JOINs, use it internally but do NOT include in final SELECT")
+        parts.append("- Do NOT display accountId or ANY column whose name contains 'uuid' (case-insensitive)")
+        parts.append("- UUID-style columns may be used internally for JOINs, but must NOT appear in visible SELECT output")
         parts.append("- Alias serialNumber AS asset_number when identifying assets")
 
         for table in self.schema_info["tables"]:

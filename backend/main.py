@@ -43,6 +43,8 @@ from app.admin_config import (
     set_guardrails_config,
     get_prompt_template,
     set_prompt_template,
+    get_sample_questions,
+    set_sample_questions,
     get_llm_config,
     set_llm_config,
 )
@@ -237,19 +239,36 @@ def admin_update_guardrails(body: GuardrailsUpdate):
 
 @app.get("/admin/config/prompt")
 def admin_get_prompt():
-    """Get current LLM prompt template (TEMP: open during testing). None = use built-in."""
-    return {"prompt_template": get_prompt_template()}
+    """
+    Get current LLM prompt template and related UX settings.
+
+    Returns:
+    {
+        "prompt_template": Optional[str],
+        "sample_questions": List[str],
+    }
+    """
+    return {
+        "prompt_template": get_prompt_template(),
+        "sample_questions": get_sample_questions(),
+    }
 
 
 class PromptUpdate(BaseModel):
     prompt_template: Optional[str] = None
+    sample_questions: Optional[list[str]] = None
 
 
 @app.put("/admin/config/prompt")
 def admin_update_prompt(body: PromptUpdate):
     """Update LLM prompt template (TEMP: open during testing). Set to null/empty to use built-in."""
     set_prompt_template(body.prompt_template if body.prompt_template else None)
-    return {"prompt_template": get_prompt_template()}
+    if body.sample_questions is not None:
+        set_sample_questions(body.sample_questions)
+    return {
+        "prompt_template": get_prompt_template(),
+        "sample_questions": get_sample_questions(),
+    }
 
 
 @app.get("/admin/config/llm")

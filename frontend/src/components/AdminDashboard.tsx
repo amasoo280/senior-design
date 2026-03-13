@@ -77,6 +77,12 @@ export default function AdminDashboard({ onClose, getAccessToken }: AdminDashboa
     tenant_column: string;
   } | null>(null);
   const [promptTemplate, setPromptTemplate] = useState<string>('');
+  const [sampleQuestions, setSampleQuestions] = useState<string[]>([
+    'Show me all equipment',
+    'How many assets are at each location?',
+    'List employees and their devices',
+    'Show recent equipment movements',
+  ]);
   const [llmConfig, setLlmConfig] = useState<{ max_tokens: number; temperature: number; validation_max_tokens: number } | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -152,6 +158,9 @@ export default function AdminDashboard({ onClose, getAccessToken }: AdminDashboa
       } else {
         setPromptTemplate(DEFAULT_VISIBLE_PROMPT_TEMPLATE);
       }
+      if (Array.isArray(data.sample_questions) && data.sample_questions.length > 0) {
+        setSampleQuestions(data.sample_questions);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load prompt');
     }
@@ -212,6 +221,24 @@ export default function AdminDashboard({ onClose, getAccessToken }: AdminDashboa
       setSaving(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save prompt');
+      setSaving(null);
+    }
+  };
+
+  const handleSaveSampleQuestions = async () => {
+    setSaving('sample_questions');
+    setError(null);
+    try {
+      const token = await getAccessToken();
+      const res = await fetch(API_ENDPOINTS.adminConfigPrompt, {
+        method: 'PUT',
+        headers: getAuthHeadersWithToken(token),
+        body: JSON.stringify({ sample_questions: sampleQuestions }),
+      });
+      if (!res.ok) throw new Error('Save failed');
+      setSaving(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save sample questions');
       setSaving(null);
     }
   };
@@ -455,6 +482,48 @@ export default function AdminDashboard({ onClose, getAccessToken }: AdminDashboa
               >
                 <Save className="w-4 h-4" />
                 {saving === 'prompt' ? 'Saving...' : 'Save prompt'}
+              </button>
+            </div>
+
+            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
+              <h4 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2">
+                <FileText className="w-4 h-4" />
+                Sample questions on welcome screen
+              </h4>
+              <p className="text-xs text-slate-500 mb-3">
+                These appear as quick-start buttons when the chat is empty. Use short, clear
+                questions that demonstrate common use cases for your data.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {sampleQuestions.map((q, idx) => (
+                  <div key={idx} className="space-y-1">
+                    <label className="text-[11px] text-slate-500 block">
+                      Question {idx + 1}
+                    </label>
+                    <input
+                      type="text"
+                      value={q}
+                      onChange={(e) => {
+                        const next = [...sampleQuestions];
+                        next[idx] = e.target.value;
+                        setSampleQuestions(next);
+                      }}
+                      placeholder={`Sample question ${idx + 1}`}
+                      className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-2">
+                Leave any field blank to hide that question from the welcome screen.
+              </p>
+              <button
+                onClick={handleSaveSampleQuestions}
+                disabled={saving === 'sample_questions'}
+                className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-500 disabled:opacity-50 text-sm"
+              >
+                <Save className="w-4 h-4" />
+                {saving === 'sample_questions' ? 'Saving...' : 'Save sample questions'}
               </button>
             </div>
 

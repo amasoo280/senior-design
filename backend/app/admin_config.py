@@ -46,6 +46,14 @@ DEFAULT_LLM = {
 # Prompt template uses placeholders: {schema_context}, {tenant_id}, {natural_language_query}
 DEFAULT_PROMPT_TEMPLATE = None  # None = use built-in prompt in BedrockClient
 
+# Default sample questions shown on the chat welcome screen.
+DEFAULT_SAMPLE_QUESTIONS = [
+    "Show me all equipment",
+    "How many assets are at each location?",
+    "List employees and their devices",
+    "Show recent equipment movements",
+]
+
 
 def _ensure_config_dir() -> None:
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -105,6 +113,26 @@ def set_prompt_template(template: Optional[str]) -> Optional[str]:
     raw["prompt_template"] = template
     _write_raw(raw)
     return get_prompt_template()
+
+
+def get_sample_questions() -> list[str]:
+    """Return the configured sample questions or sensible defaults."""
+    raw = _read_raw()
+    questions = raw.get("sample_questions")
+    if not questions or not isinstance(questions, list):
+        return DEFAULT_SAMPLE_QUESTIONS
+    # Ensure all items are strings
+    return [str(q) for q in questions if isinstance(q, str) and q.strip()]
+
+
+def set_sample_questions(questions: list[str]) -> list[str]:
+    """Persist sample questions for the chat welcome screen."""
+    raw = _read_raw()
+    # Store only non-empty strings
+    cleaned = [str(q).strip() for q in questions if str(q).strip()]
+    raw["sample_questions"] = cleaned or DEFAULT_SAMPLE_QUESTIONS
+    _write_raw(raw)
+    return get_sample_questions()
 
 
 def get_llm_config() -> dict:

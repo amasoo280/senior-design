@@ -51,6 +51,12 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
   const [showLogs, setShowLogs] = useState<boolean>(false);
   const [showAnalytics, setShowAnalytics] = useState<boolean>(false);
+  const [sampleQuestions, setSampleQuestions] = useState<string[]>([
+    'Show me all equipment',
+    'How many assets are at each location?',
+    'List employees and their devices',
+    'Show recent equipment movements',
+  ]);
   // During testing, treat all logged-in users as admin so the Admin dashboard is always visible.
   const [isAdmin, setIsAdmin] = useState<boolean>(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -71,6 +77,25 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
     auth0Logout({ logoutParams: { returnTo: window.location.origin } });
     if (onLogout) onLogout();
   };
+
+  // Load sample questions from admin config on first mount.
+  useEffect(() => {
+    (async () => {
+      try {
+        const accessToken = await getAccessToken();
+        const res = await fetch(API_ENDPOINTS.adminConfigPrompt, {
+          headers: getAuthHeadersWithToken(accessToken),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data.sample_questions) && data.sample_questions.length > 0) {
+          setSampleQuestions(data.sample_questions);
+        }
+      } catch {
+        // Silently ignore; fallback defaults are fine.
+      }
+    })();
+  }, [getAccessToken]);
 
   /**
    * Handle streaming SSE response from /ask/stream endpoint.
@@ -442,7 +467,7 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
               <h2 className="text-2xl font-semibold text-slate-300 mb-2">Welcome to Invisitag Support</h2>
               <p className="text-slate-500">Ask me anything about your database</p>
               <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg mx-auto">
-                {['Show me all equipment', 'How many assets are at each location?', 'List employees and their devices', 'Show recent equipment movements'].map((q) => (
+                {sampleQuestions.map((q) => (
                   <button
                     key={q}
                     onClick={() => { setInput(q); }}

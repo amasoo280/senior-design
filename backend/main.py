@@ -2,6 +2,7 @@ import logging
 import json
 import time
 from typing import Optional, List, Any
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -95,6 +96,7 @@ class AskResponse(BaseModel):
     execution_error: Optional[str] = None
     validation_status: Optional[str] = None
     validation_reasoning: Optional[str] = None
+    chart: Optional[dict] = None
 
 # ============================================
 # Root / Health / System Endpoints
@@ -445,6 +447,7 @@ async def ask(
             "execution_error": None,
             "validation_status": None,
             "validation_reasoning": None,
+            "chart": None,
         }
 
         # Execute query if requested (only for SQL mode)
@@ -464,6 +467,14 @@ async def ask(
                 response_data["rows"] = rows
                 response_data["row_count"] = len(rows)
                 logger.info(f"Query executed successfully | rows_returned={len(rows)}")
+
+                chart_type = _requested_chart_type(request.query)
+                if chart_type:
+                    response_data["chart"] = _build_chart_payload(
+                        rows=rows,
+                        chart_type=chart_type,
+                        query=request.query,
+                    )
                 
                 # Data validation through prompting
                 if rows and len(rows) > 0:
@@ -642,6 +653,20 @@ async def ask_stream(
                         # Stream rows one by one for dynamic effect
                         for i, row in enumerate(rows):
                             yield _sse_event("data_row", {"row": row, "index": i})
+
+                    chart_type = _requested_chart_type(request.query)
+                    if chart_type:
+                        chart_payload = _build_chart_payload(
+                            rows=rows,
+                            chart_type=chart_type,
+                            query=request.query,
+                        )
+                        if chart_payload:
+                            yield _sse_event("chart", {"chart": chart_payload})
+                        else:
+                            yield _sse_event("thinking", {
+                                "message": "I could not build a chart from this result set. Try returning one label column and one numeric column."
+                            })
                     
                     yield _sse_event("thinking", {
                         "message": f"Query returned {len(rows)} result{'s' if len(rows) != 1 else ''}."
@@ -745,3 +770,95 @@ def _filter_cloud_uuids(rows: List[dict]) -> List[dict]:
         filtered.append(new_row)
     
     return filtered
+
+
+def _requested_chart_type(query: str) -> Optional[str]:
+    """Return a chart type only when the user explicitly asks for one."""
+    text = (query or "").lower()
+    chart_keywords = ("chart", "graph", "plot", "visualize", "visualization")
+    if not any(keyword in text for keyword in chart_keywords):
+        return None
+    if "pie" in text:
+        return "pie"
+    return "bar"
+
+
+def _build_chart_payload(rows: List[dict], chart_type: str, query: str) -> Optional[dict]:
+    """Build a third-party chart URL and metadata from tabular SQL results."""
+    if not rows:
+        return None
+
+    first_row = rows[0]
+    if not isinstance(first_row, dict) or len(first_row.keys()) < 2:
+        return None
+
+    keys = list(first_row.keys())
+    numeric_keys = [
+        key for key in keys
+        if isinstance(first_row.get(key), (int, float)) and not isinstance(first_row.get(key), bool)
+    ]
+    if not numeric_keys:
+        return None
+
+    value_key = numeric_keys[0]
+    label_key = next((key for key in keys if key != value_key), None)
+    if not label_key:
+        return None
+
+    labels: List[str] = []
+    values: List[float] = []
+    for row in rows:
+        label_raw = row.get(label_key)
+        value_raw = row.get(value_key)
+        if value_raw is None or isinstance(value_raw, bool) or not isinstance(value_raw, (int, float)):
+            continue
+        labels.append(str(label_raw) if label_raw is not None else "(blank)")
+        values.append(float(value_raw))
+
+    if not labels or not values:
+        return None
+
+    labels = labels[:20]
+    values = values[:20]
+
+    dataset = {
+        "label": value_key.replace("_", " ").title(),
+        "data": values,
+    }
+    if chart_type == "pie":
+        dataset["backgroundColor"] = [
+            "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#a855f7",
+            "#14b8a6", "#f97316", "#84cc16", "#ec4899", "#64748b",
+        ]
+    else:
+        dataset["backgroundColor"] = "#3b82f6"
+        dataset["borderRadius"] = 6
+
+    chart_config = {
+        "type": chart_type,
+        "data": {
+            "labels": labels,
+            "datasets": [dataset],
+        },
+        "options": {
+            "plugins": {
+                "legend": {"display": chart_type == "pie"},
+                "title": {
+                    "display": True,
+                    "text": "Requested chart",
+                },
+            },
+        },
+    }
+
+    encoded_chart = quote(json.dumps(chart_config, separators=(",", ":")))
+    chart_url = f"{settings.chart_service_base_url}?c={encoded_chart}"
+
+    return {
+        "type": chart_type,
+        "url": chart_url,
+        "title": f"{chart_type.title()} chart",
+        "label_key": label_key,
+        "value_key": value_key,
+        "source_query": query,
+    }

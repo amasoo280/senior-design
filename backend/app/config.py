@@ -57,6 +57,9 @@ if USE_V2_CONFIG:
         
         # Frontend URL for CORS
         frontend_url: str = Field("http://localhost:5173", env="FRONTEND_URL")
+
+        # Third-party chart rendering service
+        chart_service_base_url: str = Field("https://quickchart.io/chart", env="CHART_SERVICE_BASE_URL")
         
         # Admin emails (comma-separated list)
         admin_emails_raw: str | None = Field(None, env="ADMIN_EMAILS")
@@ -113,6 +116,9 @@ else:
         
         # Frontend URL
         frontend_url: str = "http://localhost:5173"
+
+        # Third-party chart rendering service
+        chart_service_base_url: str = "https://quickchart.io/chart"
         
         # Admin emails
         admin_emails_raw: str | None = None

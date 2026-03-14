@@ -3,7 +3,7 @@ import { Auth0Provider, useAuth0 } from '@auth0/auth0-react';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
 import AdminDashboard from './components/AdminDashboard';
-import { AUTH0_DOMAIN, AUTH0_CLIENT_ID } from './config';
+import { AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_AUDIENCE } from './config';
 import './index.css';
 
 function AppContent() {
@@ -74,6 +74,7 @@ function App() {
       clientId={AUTH0_CLIENT_ID}
       authorizationParams={{
         redirect_uri: window.location.origin,
+        audience: AUTH0_AUDIENCE,
       }}
       cacheLocation="localstorage"
     >

@@ -231,8 +231,8 @@ def get_analytics(user: dict = Depends(get_current_user)):
 # ============================================
 
 @app.get("/admin/config/guardrails")
-def admin_get_guardrails():
-    """Get current guardrails configuration (TEMP: open during testing)."""
+def admin_get_guardrails(user: dict = Depends(require_admin)):
+    """Get current guardrails configuration (admin only)."""
     return get_guardrails_config()
 
 
@@ -244,8 +244,8 @@ class GuardrailsUpdate(BaseModel):
 
 
 @app.put("/admin/config/guardrails")
-def admin_update_guardrails(body: GuardrailsUpdate):
-    """Update guardrails configuration (TEMP: open during testing)."""
+def admin_update_guardrails(body: GuardrailsUpdate, user: dict = Depends(require_admin)):
+    """Update guardrails configuration (admin only)."""
     config = {}
     if body.allowed_tenant_ids is not None:
         config["allowed_tenant_ids"] = body.allowed_tenant_ids
@@ -259,7 +259,7 @@ def admin_update_guardrails(body: GuardrailsUpdate):
 
 
 @app.get("/admin/config/prompt")
-def admin_get_prompt():
+def admin_get_prompt(user: dict = Depends(require_admin)):
     """
     Get current LLM prompt template and related UX settings.
 
@@ -281,8 +281,8 @@ class PromptUpdate(BaseModel):
 
 
 @app.put("/admin/config/prompt")
-def admin_update_prompt(body: PromptUpdate):
-    """Update LLM prompt template (TEMP: open during testing). Set to null/empty to use built-in."""
+def admin_update_prompt(body: PromptUpdate, user: dict = Depends(require_admin)):
+    """Update LLM prompt template (admin only). Set to null/empty to use built-in."""
     set_prompt_template(body.prompt_template if body.prompt_template else None)
     if body.sample_questions is not None:
         set_sample_questions(body.sample_questions)
@@ -293,8 +293,8 @@ def admin_update_prompt(body: PromptUpdate):
 
 
 @app.get("/admin/config/llm")
-def admin_get_llm():
-    """Get LLM parameters: max_tokens, temperature, etc. (TEMP: open during testing)."""
+def admin_get_llm(user: dict = Depends(require_admin)):
+    """Get LLM parameters: max_tokens, temperature, etc. (admin only)."""
     return get_llm_config()
 
 
@@ -305,8 +305,8 @@ class LLMUpdate(BaseModel):
 
 
 @app.put("/admin/config/llm")
-def admin_update_llm(body: LLMUpdate):
-    """Update LLM parameters (TEMP: open during testing)."""
+def admin_update_llm(body: LLMUpdate, user: dict = Depends(require_admin)):
+    """Update LLM parameters (admin only)."""
     config = {}
     if body.max_tokens is not None:
         config["max_tokens"] = body.max_tokens
@@ -318,20 +318,20 @@ def admin_update_llm(body: LLMUpdate):
 
 
 @app.get("/admin/metrics")
-def admin_get_metrics():
-    """Get full metrics including totals and per-tenant breakdown (TEMP: open during testing)."""
+def admin_get_metrics(user: dict = Depends(require_admin)):
+    """Get full metrics including totals and per-tenant breakdown (admin only)."""
     return get_metrics()
 
 
 @app.get("/admin/metrics/accounts")
-def admin_list_accounts():
-    """List tenant IDs that have metrics (TEMP: open during testing)."""
+def admin_list_accounts(user: dict = Depends(require_admin)):
+    """List tenant IDs that have metrics (admin only)."""
     return {"tenant_ids": get_all_tenant_ids()}
 
 
 @app.get("/admin/metrics/account/{tenant_id}")
-def admin_get_account_metrics(tenant_id: str):
-    """Get metrics for a specific account/tenant (TEMP: open during testing)."""
+def admin_get_account_metrics(tenant_id: str, user: dict = Depends(require_admin)):
+    """Get metrics for a specific account/tenant (admin only)."""
     return get_metrics_by_tenant(tenant_id)
 
 
@@ -340,8 +340,9 @@ def admin_get_logs(
     limit: int = 200,
     level: Optional[str] = None,
     tenant_id: Optional[str] = None,
+    user: dict = Depends(require_admin),
 ):
-    """Get application logs, optionally filtered by tenant (TEMP: open during testing)."""
+    """Get application logs, optionally filtered by tenant (admin only)."""
     limit = min(limit, 500)
     logs = get_logs(limit=limit, level=level, tenant_id=tenant_id)
     return {"logs": logs, "count": len(logs)}

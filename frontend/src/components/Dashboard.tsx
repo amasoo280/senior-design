@@ -60,8 +60,8 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
     'List employees and their devices',
     'Show recent equipment movements',
   ]);
-  // During testing, treat all logged-in users as admin so the Admin dashboard is always visible.
-  const [isAdmin, setIsAdmin] = useState<boolean>(true);
+  // Check admin status from backend /auth/me endpoint
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -73,8 +73,24 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
     scrollToBottom();
   }, [messages]);
 
-  // NOTE: In production, this effect should call /auth/me to compute isAdmin from the backend.
-  // For now (testing), we skip it and rely on isAdmin defaulting to true.
+  // Fetch admin status from /auth/me on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const accessToken = await getAccessToken();
+        const res = await fetch(API_ENDPOINTS.me, {
+          headers: getAuthHeadersWithToken(accessToken),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setIsAdmin(data.user?.is_admin === true);
+        }
+      } catch {
+        // If /auth/me fails, user is not admin
+        setIsAdmin(false);
+      }
+    })();
+  }, [getAccessToken]);
 
   const handleLogout = async () => {
     auth0Logout({ logoutParams: { returnTo: window.location.origin } });
@@ -508,8 +524,8 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
 
               <div
                 className={`max-w-[85%] rounded-2xl px-4 py-3 ${message.role === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-800 text-slate-200'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-800 text-slate-200'
                   }`}
               >
                 {message.role === 'user' ? (

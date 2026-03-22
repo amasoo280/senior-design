@@ -35,6 +35,7 @@ from app.metrics import (
 )
 from app.safety.guardrails import SQLGuardrails
 from app.schema.context import SchemaContext
+from app.sanitize_thinking import sanitize_thinking_text
 
 # Auth0 authentication
 from app.auth import get_current_user, get_optional_user, require_admin
@@ -97,6 +98,26 @@ class AskResponse(BaseModel):
     execution_error: Optional[str] = None
     validation_status: Optional[str] = None
     validation_reasoning: Optional[str] = None
+    data_withheld: bool = False
+    clarification_message: Optional[str] = None
+
+
+# Data validation: these statuses mean we should not show result rows until the user clarifies.
+_LOW_DATA_VALIDATION_STATUSES = frozenset({"partial", "mismatch"})
+
+
+def _is_low_data_validation(status: Optional[str]) -> bool:
+    s = (status or "").strip().lower()
+    return s in _LOW_DATA_VALIDATION_STATUSES
+
+
+def _clarification_follow_up_message() -> str:
+    """Short follow-up prompt when result rows are withheld due to low data validation confidence."""
+    return (
+        "We're not confident these results matched your question, so we didn't show the table. "
+        "Could you clarify what you meant—for example what counts as a \"job\" or job site—or "
+        "describe more specifically what you need?"
+    )
 
 # ============================================
 # Root / Health / System Endpoints
@@ -484,7 +505,7 @@ async def ask(
                 response_data["row_count"] = len(rows)
                 logger.info(f"Query executed successfully | rows_returned={len(rows)}")
                 
-                # Data validation through prompting
+                # Data validation through prompting (before returning rows if low confidence)
                 if rows and len(rows) > 0:
                     try:
                         validation = bedrock_client.validate_results(
@@ -493,9 +514,16 @@ async def ask(
                             results=rows[:20],  # Send first 20 rows for validation
                             tenant_id=tenant_id,
                         )
-                        response_data["validation_status"] = validation.get("status", "unknown")
-                        response_data["validation_reasoning"] = validation.get("reasoning", "")
-                        logger.info(f"Data validation: {validation.get('status', 'unknown')}")
+                        vstatus = validation.get("status", "unknown")
+                        reasoning = validation.get("reasoning", "")
+                        response_data["validation_status"] = vstatus
+                        response_data["validation_reasoning"] = reasoning
+                        logger.info(f"Data validation: {vstatus}")
+                        if _is_low_data_validation(vstatus):
+                            response_data["data_withheld"] = True
+                            response_data["clarification_message"] = _clarification_follow_up_message()
+                            response_data["rows"] = None
+                            response_data["row_count"] = 0
                     except Exception as val_err:
                         logger.warning(f"Data validation failed (non-critical): {val_err}")
                         response_data["validation_status"] = "skipped"
@@ -552,7 +580,7 @@ async def ask_stream(
     - sql: The generated SQL query
     - data_row: Individual row of results (streamed one by one)
     - validation: Data validation result
-    - done: Final completion event
+    - done: Final completion event (data_withheld + clarification_message when validation is partial/mismatch)
     - error: Error event
     """
     tenant_id = request.tenant_id or x_tenant_id or settings.default_tenant_id
@@ -576,9 +604,18 @@ async def ask_stream(
 
     async def event_stream():
         """Generator that yields SSE events."""
+        def _thinking(msg: str) -> str:
+            """Strip SQL and identifiers from text shown in the thinking stream."""
+            return sanitize_thinking_text(msg, tenant_id=tenant_id)
+
         try:
             schema_context_str = schema_context.get_schema_context()
-            yield _sse_event("thinking", {"message": "Analyzing your question..."})
+            # Model thinking is streamed in many small chunks; sanitizing each chunk alone
+            # fails (UUIDs/SQL split across chunks). Accumulate raw text, then sanitize the
+            # full buffer each time. Each SSE carries the full snapshot — client replaces, not appends.
+            thinking_prefix = "Analyzing your question..."
+            model_thinking_raw = ""
+            yield _sse_event("thinking", {"message": _thinking(thinking_prefix)})
 
             # Phase 2: Generate SQL using streaming Bedrock thinking
             bedrock_result = None
@@ -589,7 +626,12 @@ async def ask_stream(
                 request_id=request_id,
             ):
                 if event.get("event") == "thinking":
-                    yield _sse_event("thinking", {"message": event.get("text", "")})
+                    model_thinking_raw += event.get("text", "")
+                    combined = (
+                        f"{thinking_prefix}\n\n"
+                        f"{sanitize_thinking_text(model_thinking_raw, tenant_id=tenant_id)}"
+                    )
+                    yield _sse_event("thinking", {"message": combined})
                 elif event.get("event") == "final":
                     bedrock_result = event.get("result")
 
@@ -642,7 +684,12 @@ async def ask_stream(
 
             # Phase 3: Execute and stream data
             if request.execute:
-                yield _sse_event("thinking", {"message": "Executing query against the database..."})
+                post_model_thinking = (
+                    f"{thinking_prefix}\n\n"
+                    f"{sanitize_thinking_text(model_thinking_raw, tenant_id=tenant_id)}\n\n"
+                    f"{_thinking('Executing query against the database...')}"
+                )
+                yield _sse_event("thinking", {"message": post_model_thinking})
                 
                 try:
                     start_time = time.time()
@@ -653,22 +700,12 @@ async def ask_stream(
                     # Filter out cloudUUID from results
                     rows = _filter_cloud_uuids(rows)
                     
-                    # Get column headers from first row
-                    if rows and len(rows) > 0:
-                        columns = list(rows[0].keys())
-                        yield _sse_event("columns", {"columns": columns})
-                        
-                        # Stream rows one by one for dynamic effect
-                        for i, row in enumerate(rows):
-                            yield _sse_event("data_row", {"row": row, "index": i})
+                    check_thinking = post_model_thinking + "\n\n" + _thinking(
+                        "Checking whether the results match your question..."
+                    )
+                    yield _sse_event("thinking", {"message": check_thinking})
                     
-                    yield _sse_event("thinking", {
-                        "message": f"Query returned {len(rows)} result{'s' if len(rows) != 1 else ''}."
-                    })
-                    
-                    # Phase 4: Data validation
                     if rows and len(rows) > 0:
-                        yield _sse_event("thinking", {"message": "Validating results match your question..."})
                         try:
                             validation = bedrock_client.validate_results(
                                 original_query=request.query,
@@ -676,10 +713,31 @@ async def ask_stream(
                                 results=rows[:20],
                                 tenant_id=tenant_id,
                             )
+                            vstatus = validation.get("status", "unknown")
+                            sanitized_reasoning = sanitize_thinking_text(
+                                validation.get("reasoning", ""),
+                                tenant_id=tenant_id,
+                            )
                             yield _sse_event("validation", {
-                                "status": validation.get("status", "unknown"),
-                                "reasoning": validation.get("reasoning", ""),
+                                "status": vstatus,
+                                "reasoning": sanitized_reasoning,
                             })
+                            if _is_low_data_validation(vstatus):
+                                clarification = _clarification_follow_up_message()
+                                withheld_thinking = check_thinking + "\n\n" + _thinking(
+                                    "Results may not match your question; skipping the data table until you clarify."
+                                )
+                                yield _sse_event("thinking", {"message": withheld_thinking})
+                                yield _sse_event("done", {
+                                    "mode": "sql",
+                                    "sql": generated_sql,
+                                    "row_count": 0,
+                                    "execution_time_ms": execution_time_ms,
+                                    "data_withheld": True,
+                                    "clarification_message": clarification,
+                                })
+                                log_request_end(logger, request_id, success=True)
+                                return
                         except Exception as val_err:
                             logger.warning(f"Streaming validation failed: {val_err}")
                             yield _sse_event("validation", {
@@ -687,12 +745,26 @@ async def ask_stream(
                                 "reasoning": "Validation could not be performed",
                             })
                     
+                    # Stream rows only after validation passes (or was skipped)
+                    if rows and len(rows) > 0:
+                        columns = list(rows[0].keys())
+                        yield _sse_event("columns", {"columns": columns})
+                        for i, row in enumerate(rows):
+                            yield _sse_event("data_row", {"row": row, "index": i})
+                    
+                    rows_thinking = _thinking(
+                        f"Query returned {len(rows)} result{'s' if len(rows) != 1 else ''}."
+                    )
+                    after_query_thinking = post_model_thinking + "\n\n" + rows_thinking
+                    yield _sse_event("thinking", {"message": after_query_thinking})
+                    
                     # Done
                     yield _sse_event("done", {
                         "mode": "sql",
                         "sql": generated_sql,
                         "row_count": len(rows),
                         "execution_time_ms": execution_time_ms,
+                        "data_withheld": False,
                     })
                     
                 except DatabaseExecutionError as db_exc:

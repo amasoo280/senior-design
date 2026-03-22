@@ -16,7 +16,7 @@ interface StreamEvent {
 }
 
 interface ValidationInfo {
-  status: 'valid' | 'partial' | 'mismatch' | 'skipped' | 'pending';
+  status: 'valid' | 'partial' | 'mismatch' | 'skipped' | 'pending' | 'unknown';
   reasoning: string;
 }
 
@@ -35,6 +35,9 @@ interface Message {
   isStreaming?: boolean;
   thinkingSteps?: string[];
   validation?: ValidationInfo;
+  /** True when low data validation caused rows to be withheld from the client */
+  dataWithheld?: boolean;
+  clarificationMessage?: string;
 }
 
 interface DashboardProps {
@@ -180,10 +183,10 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
 
               switch (eventType) {
                 case 'thinking':
-                  // Accumulate thinking text so the user sees one continuous
-                  // streaming paragraph, similar to typical chat UIs.
-                  updated.thinkingSteps = [...(updated.thinkingSteps || []), data.message];
-                  updated.content = (updated.content || '') + data.message;
+                  // Server sends a full sanitized snapshot each time (model reasoning is
+                  // accumulated server-side so UUIDs/SQL are not split across chunks).
+                  updated.thinkingSteps = [data.message];
+                  updated.content = data.message;
                   break;
 
                 case 'sql':
@@ -209,6 +212,15 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
 
                 case 'done':
                   updated.isStreaming = false;
+                  updated.dataWithheld = data.data_withheld === true;
+                  updated.clarificationMessage = data.clarification_message ?? undefined;
+                  if (updated.dataWithheld && updated.clarificationMessage) {
+                    updated.data = [];
+                    updated.columns = [];
+                    updated.rowCount = 0;
+                    updated.content = updated.clarificationMessage;
+                    break;
+                  }
                   updated.rowCount = data.row_count ?? updated.data?.length ?? 0;
                   if (data.mode !== 'sql' && data.message) {
                     updated.content = data.message;
@@ -309,7 +321,7 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
     URL.revokeObjectURL(url);
   };
 
-  const renderValidationBadge = (validation?: ValidationInfo) => {
+  const renderValidationBadge = (validation?: ValidationInfo, hideReasoning?: boolean) => {
     if (!validation || validation.status === 'pending') return null;
 
     const statusConfig = {
@@ -317,9 +329,11 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
       partial: { icon: AlertTriangle, color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/20', label: 'Partial Match' },
       mismatch: { icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/20', label: 'Mismatch' },
       skipped: { icon: AlertCircle, color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/20', label: 'Skipped' },
+      unknown: { icon: AlertCircle, color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/20', label: 'Unknown' },
+      pending: { icon: AlertCircle, color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/20', label: 'Pending' },
     };
 
-    const config = statusConfig[validation.status] || statusConfig.skipped;
+    const config = statusConfig[validation.status] ?? statusConfig.skipped;
     const Icon = config.icon;
 
     return (
@@ -328,7 +342,7 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
           <Icon className={`w-4 h-4 ${config.color}`} />
           <span className={config.color}>Data Validation: {config.label}</span>
         </summary>
-        {validation.reasoning && (
+        {validation.reasoning && !hideReasoning && (
           <p className="text-xs text-slate-400 mt-2 px-2">{validation.reasoning}</p>
         )}
       </details>
@@ -507,7 +521,15 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
 
                     {/* Main content */}
                     {!message.isStreaming && message.content && (
-                      <p className="whitespace-pre-wrap">{message.content}</p>
+                      <div
+                        className={
+                          message.dataWithheld
+                            ? 'rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5'
+                            : ''
+                        }
+                      >
+                        <p className="whitespace-pre-wrap">{message.content}</p>
+                      </div>
                     )}
 
                     {/* Post-result thinking viewer */}
@@ -574,7 +596,7 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
                     )}
 
                     {/* Data validation badge */}
-                    {renderValidationBadge(message.validation)}
+                    {renderValidationBadge(message.validation, message.dataWithheld)}
 
                     {/* Execution error (non-fatal) */}
                     {message.executionError && (

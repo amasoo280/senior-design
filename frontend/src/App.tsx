@@ -76,7 +76,7 @@ function App() {
       clientId={AUTH0_CLIENT_ID}
       authorizationParams={{
         redirect_uri: window.location.origin,
-        audience: AUTH0_AUDIENCE,
+        ...(AUTH0_AUDIENCE ? { audience: AUTH0_AUDIENCE } : {}),
       }}
       cacheLocation="localstorage"
     >

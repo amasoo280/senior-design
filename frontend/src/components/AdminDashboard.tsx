@@ -50,6 +50,7 @@ SQL generation rules (when the request is clearly about data):
 
 Context you have:
 - Database schema:\n{schema_context}\n
+- Extra codes / enums / business rules (optional):\n{db_context}\n
 - Tenant ID for this request: {tenant_id}
 - User's original question: {natural_language_query}
 
@@ -78,6 +79,7 @@ export default function AdminDashboard({ onClose, getAccessToken, user }: AdminD
     tenant_column: string;
   } | null>(null);
   const [promptTemplate, setPromptTemplate] = useState<string>('');
+  const [dbContext, setDbContext] = useState<string>('');
   const [sampleQuestions, setSampleQuestions] = useState<string[]>([
     'Show me all equipment',
     'How many assets are at each location?',
@@ -162,6 +164,7 @@ export default function AdminDashboard({ onClose, getAccessToken, user }: AdminD
       if (Array.isArray(data.sample_questions) && data.sample_questions.length > 0) {
         setSampleQuestions(data.sample_questions);
       }
+      setDbContext(typeof data.db_context === 'string' ? data.db_context : '');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load prompt');
     }
@@ -240,6 +243,24 @@ export default function AdminDashboard({ onClose, getAccessToken, user }: AdminD
       setSaving(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save sample questions');
+      setSaving(null);
+    }
+  };
+
+  const handleSaveDbContext = async () => {
+    setSaving('db_context');
+    setError(null);
+    try {
+      const token = await getAccessToken();
+      const res = await fetch(API_ENDPOINTS.adminConfigPrompt, {
+        method: 'PUT',
+        headers: getAuthHeadersWithToken(token),
+        body: JSON.stringify({ db_context: dbContext }),
+      });
+      if (!res.ok) throw new Error('Save failed');
+      setSaving(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save database context');
       setSaving(null);
     }
   };
@@ -464,10 +485,36 @@ export default function AdminDashboard({ onClose, getAccessToken, user }: AdminD
             <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 flex flex-col flex-1 min-h-0">
               <h4 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2 shrink-0">
                 <FileText className="w-4 h-4" />
+                Database context
+              </h4>
+              <p className="text-xs text-slate-500 mb-3 shrink-0">
+                Optional notes for the model: enum values, column meanings, or business rules not obvious from the schema.
+                Example: locationType 0 = warehouse, 1 = truck, 2 = on job site. Injected into every NL→SQL prompt (built-in
+                or custom). Custom templates can use {'{db_context}'}.
+              </p>
+              <textarea
+                value={dbContext}
+                onChange={(e) => setDbContext(e.target.value)}
+                placeholder="e.g. EquipmentLocation.locationType: 0 = warehouse, 1 = truck, 2 = on job..."
+                className="w-full min-h-[8rem] max-h-64 bg-slate-900 border border-slate-600 rounded px-3 py-2 text-white text-sm font-mono resize-y overflow-y-auto"
+              />
+              <button
+                onClick={handleSaveDbContext}
+                disabled={saving === 'db_context'}
+                className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-500 disabled:opacity-50 text-sm"
+              >
+                <Save className="w-4 h-4" />
+                {saving === 'db_context' ? 'Saving...' : 'Save database context'}
+              </button>
+            </div>
+
+            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 flex flex-col flex-1 min-h-0">
+              <h4 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2 shrink-0">
+                <FileText className="w-4 h-4" />
                 LLM prompt template
               </h4>
               <p className="text-xs text-slate-500 mb-3 shrink-0">
-                Use placeholders: {'{schema_context}'}, {'{tenant_id}'}, {'{natural_language_query}'}.
+                Use placeholders: {'{schema_context}'}, {'{tenant_id}'}, {'{natural_language_query}'}, {'{db_context}'}.
                 Leave empty to use built-in prompt.
               </p>
               <textarea

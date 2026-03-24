@@ -46,6 +46,8 @@ from app.admin_config import (
     set_prompt_template,
     get_sample_questions,
     set_sample_questions,
+    get_db_context,
+    set_db_context,
     get_llm_config,
     set_llm_config,
 )
@@ -267,28 +269,36 @@ def admin_get_prompt(user: dict = Depends(require_admin)):
     {
         "prompt_template": Optional[str],
         "sample_questions": List[str],
+        "db_context": Optional[str],
     }
     """
     return {
         "prompt_template": get_prompt_template(),
         "sample_questions": get_sample_questions(),
+        "db_context": get_db_context(),
     }
 
 
 class PromptUpdate(BaseModel):
     prompt_template: Optional[str] = None
     sample_questions: Optional[list[str]] = None
+    db_context: Optional[str] = None
 
 
 @app.put("/admin/config/prompt")
 def admin_update_prompt(body: PromptUpdate, user: dict = Depends(require_admin)):
     """Update LLM prompt template (admin only). Set to null/empty to use built-in."""
-    set_prompt_template(body.prompt_template if body.prompt_template else None)
-    if body.sample_questions is not None:
+    data = body.model_dump(exclude_unset=True)
+    if "prompt_template" in data:
+        set_prompt_template(body.prompt_template if body.prompt_template else None)
+    if "sample_questions" in data and body.sample_questions is not None:
         set_sample_questions(body.sample_questions)
+    if "db_context" in data:
+        set_db_context(body.db_context)
     return {
         "prompt_template": get_prompt_template(),
         "sample_questions": get_sample_questions(),
+        "db_context": get_db_context(),
     }
 
 

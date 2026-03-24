@@ -13,7 +13,7 @@ from typing import Optional, List, Dict, Any, Iterable
 
 from app.config import settings
 from app.logging.logger import get_logger, log_raw_model_output, set_request_context
-from app.admin_config import get_prompt_template, get_llm_config
+from app.admin_config import get_prompt_template, get_llm_config, get_db_context
 
 
 class BedrockClient:
@@ -384,17 +384,34 @@ Rules:
         schema_context: str,
         tenant_id: str,
     ) -> str:
+        db_context_str = get_db_context() or ""
+
         custom = get_prompt_template()
         if custom and custom.strip():
             # Do NOT use str.format() on the custom template: it contains JSON with
             # literal braces (e.g. { "mode": ... }), which .format() would treat as
             # placeholders and raise KeyError. Substitute only our known placeholders.
-            return (
+            out = (
                 custom.replace("{schema_context}", schema_context)
                 .replace("{tenant_id}", tenant_id)
                 .replace("{natural_language_query}", natural_language_query)
-                .strip()
+                .replace("{db_context}", db_context_str)
             )
+            if "{db_context}" not in custom and db_context_str.strip():
+                out = (
+                    out.rstrip()
+                    + "\n\nAdditional database context (from administrator):\n"
+                    + db_context_str.strip()
+                )
+            return out.strip()
+
+        extra_block = ""
+        if db_context_str.strip():
+            extra_block = f"""Additional database context (from administrator):
+{db_context_str.strip()}
+
+"""
+
         return f"""
 You are an AI assistant for an asset-tracking system.
 
@@ -434,7 +451,7 @@ Return JSON in exactly this format:
   "sql": "SQL query if mode is sql, otherwise null"
 }}
 
-Database schema:
+{extra_block}Database schema:
 {schema_context}
 
 User input:

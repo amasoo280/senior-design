@@ -4,7 +4,7 @@ import {
   Send, Loader2, User, Code, AlertCircle, UserCircle,
   FileText, BarChart3, LogOut, CheckCircle, AlertTriangle, XCircle, Download, Shield
 } from 'lucide-react';
-import { API_ENDPOINTS, DEFAULT_TENANT_ID } from '../config';
+import { API_ENDPOINTS, DEFAULT_TENANT_ID, SHOW_SQL_UI } from '../config';
 import { getAuthHeadersWithToken } from '../utils/auth';
 import LogsViewer from './LogsViewer';
 import AnalyticsDashboard from './AnalyticsDashboard';
@@ -583,8 +583,8 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
                       </div>
                     )}
 
-                    {/* SQL */}
-                    {message.sql && (
+                    {/* SQL (dev-only unless VITE_SHOW_SQL overrides; see config.ts) */}
+                    {SHOW_SQL_UI && message.sql && (
                       <details className="mt-3">
                         <summary className="cursor-pointer text-sm text-slate-400 hover:text-slate-300 flex items-center gap-2">
                           <Code className="w-4 h-4" />

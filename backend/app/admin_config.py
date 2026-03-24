@@ -43,8 +43,11 @@ DEFAULT_LLM = {
     "validation_max_tokens": 1024,
 }
 
-# Prompt template uses placeholders: {schema_context}, {tenant_id}, {natural_language_query}
+# Prompt template uses placeholders: {schema_context}, {tenant_id}, {natural_language_query}, {db_context}
 DEFAULT_PROMPT_TEMPLATE = None  # None = use built-in prompt in BedrockClient
+
+# Free-form enum / business notes for the LLM (admin-edited). Enforced max length on save/read.
+DB_CONTEXT_MAX_CHARS = 12000
 
 # Default sample questions shown on the chat welcome screen.
 DEFAULT_SAMPLE_QUESTIONS = [
@@ -133,6 +136,47 @@ def set_sample_questions(questions: list[str]) -> list[str]:
     raw["sample_questions"] = cleaned or DEFAULT_SAMPLE_QUESTIONS
     _write_raw(raw)
     return get_sample_questions()
+
+
+def get_db_context() -> Optional[str]:
+    """
+    Optional free-text context (enums, codes) injected into NL→SQL prompts.
+    Returns None if unset or empty after trim.
+    """
+    raw = _read_raw()
+    val = raw.get("db_context")
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    if len(s) > DB_CONTEXT_MAX_CHARS:
+        logger.warning(
+            "db_context truncated from %d to %d characters",
+            len(s),
+            DB_CONTEXT_MAX_CHARS,
+        )
+        return s[:DB_CONTEXT_MAX_CHARS]
+    return s
+
+
+def set_db_context(value: Optional[str]) -> Optional[str]:
+    """Persist db_context; pass None or empty string to clear."""
+    raw = _read_raw()
+    if value is None or not str(value).strip():
+        raw.pop("db_context", None)
+    else:
+        s = str(value).strip()
+        if len(s) > DB_CONTEXT_MAX_CHARS:
+            logger.warning(
+                "db_context truncated on save from %d to %d characters",
+                len(s),
+                DB_CONTEXT_MAX_CHARS,
+            )
+            s = s[:DB_CONTEXT_MAX_CHARS]
+        raw["db_context"] = s
+    _write_raw(raw)
+    return get_db_context()
 
 
 def get_llm_config() -> dict:

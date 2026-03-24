@@ -355,13 +355,22 @@ def admin_get_logs(
 @app.post("/ask", response_model=AskResponse)
 async def ask(
     request: AskRequest,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID")
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    user: Optional[dict] = Depends(get_optional_user)
 ):
     """
     Convert natural language query to SQL and optionally execute it.
     """
-    # Determine tenant_id from request body, header, or env (NO literal "default" fallback)
-    tenant_id = request.tenant_id or x_tenant_id or settings.default_tenant_id
+    # Determine tenant_id with priority:
+    # 1. Auth0 token custom claim
+    # 2. Request body (request.tenant_id)
+    # 3. Header (X-Tenant-ID)
+    # 4. Environment default (settings.default_tenant_id)
+    token_tenant_id = None
+    if user:
+        token_tenant_id = user.get("https://api.sargon.com/tenant_id")
+        
+    tenant_id = token_tenant_id or request.tenant_id or x_tenant_id or settings.default_tenant_id
     
     # Track metrics: increment request count (track ALL requests, even failed ones)
     increment_request_count(tenant_id)
@@ -571,7 +580,8 @@ async def ask(
 @app.post("/ask/stream")
 async def ask_stream(
     request: AskRequest,
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID")
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    user: Optional[dict] = Depends(get_optional_user)
 ):
     """
     Convert natural language query to SQL and execute it with Server-Sent Events streaming.
@@ -584,7 +594,11 @@ async def ask_stream(
     - done: Final completion event (data_withheld + clarification_message when validation is partial/mismatch)
     - error: Error event
     """
-    tenant_id = request.tenant_id or x_tenant_id or settings.default_tenant_id
+    token_tenant_id = None
+    if user:
+        token_tenant_id = user.get("https://api.sargon.com/tenant_id")
+        
+    tenant_id = token_tenant_id or request.tenant_id or x_tenant_id or settings.default_tenant_id
     increment_request_count(tenant_id)
     
     if not tenant_id:

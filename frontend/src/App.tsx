@@ -7,7 +7,7 @@ import { AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_AUDIENCE } from './config';
 import './index.css';
 
 function AppContent() {
-  const { isAuthenticated, isLoading, error, getAccessTokenSilently, getIdTokenClaims } = useAuth0();
+  const { isAuthenticated, isLoading, error, getAccessTokenSilently, getIdTokenClaims, user } = useAuth0();
   const [showAdmin, setShowAdmin] = React.useState(false);
 
   if (isLoading) {
@@ -41,6 +41,7 @@ function AppContent() {
     return (
       <AdminDashboard
         getAccessToken={getToken}
+        user={user}
         onClose={() => setShowAdmin(false)}
       />
     );
@@ -49,6 +50,7 @@ function AppContent() {
   return (
     <Dashboard
       getAccessToken={getToken}
+      user={user}
       onOpenAdmin={() => setShowAdmin(true)}
     />
   );

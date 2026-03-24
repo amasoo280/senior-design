@@ -42,12 +42,13 @@ interface Message {
 
 interface DashboardProps {
   getAccessToken: () => Promise<string>;
+  user?: any;
   onLogout?: () => void;
   onOpenAdmin?: () => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenAdmin }) => {
-  const { logout: auth0Logout, user } = useAuth0();
+const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, onOpenAdmin }) => {
+  const { logout: auth0Logout } = useAuth0();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -139,15 +140,21 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, onLogout, onOpenA
     try {
       const accessToken = await getAccessToken();
 
+      // Get tenant ID from custom Auth0 claim, fallback to env default
+      const tokenTenantId = user?.['https://api.sargon.com/tenant_id'];
+      const activeTenantId = tokenTenantId || DEFAULT_TENANT_ID || '';
+      console.log("Extracted Auth0 Tenant ID:", tokenTenantId);
+      console.log("Using Active Tenant ID:", activeTenantId);
+
       const response = await fetch(API_ENDPOINTS.askStream, {
         method: 'POST',
         headers: {
           ...getAuthHeadersWithToken(accessToken),
-          'X-Tenant-ID': DEFAULT_TENANT_ID || '',
+          'X-Tenant-ID': activeTenantId,
         },
         body: JSON.stringify({
           query: query,
-          tenant_id: DEFAULT_TENANT_ID,
+          tenant_id: activeTenantId,
           execute: true,
         }),
       });

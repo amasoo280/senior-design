@@ -16,6 +16,7 @@ import { getAuthHeadersWithToken } from '../utils/auth';
 interface AdminDashboardProps {
   onClose: () => void;
   getAccessToken: () => Promise<string>;
+  user?: any;
 }
 
 type Section = 'guardrails' | 'accounts' | 'totals';
@@ -57,7 +58,7 @@ Decide how to respond:
 - If the user question is unclear or missing key details, ask a follow-up clarification question.
 - If the user clearly wants data, generate a SQL query that follows the rules above.`;
 
-export default function AdminDashboard({ onClose, getAccessToken }: AdminDashboardProps) {
+export default function AdminDashboard({ onClose, getAccessToken, user }: AdminDashboardProps) {
   const [activeSection, setActiveSection] = useState<Section>('totals');
   const [totals, setTotals] = useState<{
     total_requests: number;

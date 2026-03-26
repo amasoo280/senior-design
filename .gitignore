@@ -50,3 +50,7 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
+
+# Admin config — contains runtime-edited settings (prompts, LLM params, db context).
+# Never overwrite the live server's config on deploy.
+backend/data/admin_config.json

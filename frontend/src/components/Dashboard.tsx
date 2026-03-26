@@ -15,6 +15,14 @@ interface ValidationInfo {
   reasoning: string;
 }
 
+interface ChartInfo {
+  type: 'bar' | 'pie';
+  url: string;
+  title?: string;
+  label_key?: string;
+  value_key?: string;
+}
+
 interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -32,6 +40,7 @@ interface Message {
   validation?: ValidationInfo;
   dataWithheld?: boolean;
   clarificationMessage?: string;
+  chart?: ChartInfo;
 }
 
 interface ChatSession {
@@ -40,7 +49,6 @@ interface ChatSession {
   created_at: string;
   updated_at: string;
   message_count: number;
-}
 
 interface DashboardProps {
   getAccessToken: () => Promise<string>;
@@ -320,6 +328,11 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
                 case 'validation':
                   u.validation = { status: data.status, reasoning: data.reasoning };
                   break;
+
+                case 'chart':
+                  updated.chart = data.chart;
+                  break;
+
                 case 'done':
                   u.isStreaming = false;
                   u.dataWithheld = data.data_withheld === true;
@@ -736,6 +749,25 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
                             >
                               <Download className="w-3 h-3" /> Export CSV
                             </button>
+                          )}
+                        </div>
+                      )}
+                      {/* Chart (shown only when explicitly requested and provided by backend) */}
+                      {message.chart?.url && (
+                        <div className="mt-3 p-3 bg-slate-900/50 rounded-lg border border-slate-700">
+                          <p className="text-sm text-slate-300 mb-2">
+                            {message.chart.title || 'Chart'}
+                          </p>
+                          <img
+                            src={message.chart.url}
+                            alt={message.chart.title || `${message.chart.type} chart`}
+                            className="w-full rounded-md border border-slate-700 bg-slate-950"
+                            loading="lazy"
+                          />
+                          {message.chart.label_key && message.chart.value_key && (
+                            <p className="text-xs text-slate-500 mt-2">
+                              X: {message.chart.label_key} | Y: {message.chart.value_key}
+                            </p>
                           )}
                         </div>
                       )}

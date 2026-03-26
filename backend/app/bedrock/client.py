@@ -59,16 +59,6 @@ class BedrockClient:
         temperature: Optional[float] = None,
         request_id: Optional[str] = None,
     ) -> dict:
-        """
-        Generate a response from Bedrock (non-streaming).
-        Uses admin config for max_tokens/temperature if not passed.
-
-        Returns a dict with:
-        - mode: chat | clarification | sql
-        - response: user-facing message
-        - sql: SQL string if mode == sql
-        - explanation: internal explanation (optional)
-        """
         llm_config = get_llm_config()
         max_tokens = max_tokens if max_tokens is not None else llm_config["max_tokens"]
         temperature = temperature if temperature is not None else llm_config["temperature"]
@@ -76,7 +66,7 @@ class BedrockClient:
         if request_id:
             set_request_context(request_id, tenant_id)
 
-        prompt = self._build_prompt(
+        system_blocks, messages = self._build_cached_messages(
             natural_language_query=natural_language_query,
             schema_context=schema_context,
             tenant_id=tenant_id,
@@ -86,12 +76,8 @@ class BedrockClient:
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": max_tokens,
             "temperature": temperature,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
+            "system": system_blocks,
+            "messages": messages,
         }
 
         try:
@@ -163,7 +149,7 @@ class BedrockClient:
         if request_id:
             set_request_context(request_id, tenant_id)
 
-        prompt = self._build_prompt(
+        system_blocks, messages = self._build_cached_messages(
             natural_language_query=natural_language_query,
             schema_context=schema_context,
             tenant_id=tenant_id,
@@ -180,12 +166,8 @@ class BedrockClient:
                 "type": "enabled",
                 "budget_tokens": thinking_budget,
             },
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
+            "system": system_blocks,
+            "messages": messages,
         }
 
         start_time = time.time()
@@ -208,6 +190,8 @@ class BedrockClient:
             accumulated_text = ""
             input_tokens = 0
             output_tokens = 0
+            cache_read_tokens = 0
+            cache_write_tokens = 0
 
             for event in response.get("body", []):
                 chunk = event.get("chunk")
@@ -227,10 +211,12 @@ class BedrockClient:
 
                 event_type = payload.get("type")
 
-                # Capture input token count from message_start
+                # Capture token counts from message_start (includes cache stats)
                 if event_type == "message_start":
                     usage = payload.get("message", {}).get("usage", {})
                     input_tokens = usage.get("input_tokens", 0)
+                    cache_read_tokens = usage.get("cache_read_input_tokens", 0)
+                    cache_write_tokens = usage.get("cache_creation_input_tokens", 0)
 
                 # Capture output token count from message_delta
                 elif event_type == "message_delta":
@@ -269,13 +255,23 @@ class BedrockClient:
                 f"Parsed streaming model output | mode={mode} | sql_length={sql_length}"
             )
 
+            self.logger.info(
+                f"Token usage | input={input_tokens} output={output_tokens} "
+                f"cache_read={cache_read_tokens} cache_write={cache_write_tokens}"
+            )
+
             result = {
                 "mode": mode,
                 "response": model_output.get("response"),
                 "sql": sql,
                 "explanation": model_output.get("explanation"),
                 "model_id": self.model_id,
-                "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cache_read_input_tokens": cache_read_tokens,
+                    "cache_creation_input_tokens": cache_write_tokens,
+                },
             }
 
             yield {"event": "final", "result": result}
@@ -389,42 +385,60 @@ Rules:
     # Prompt construction
     # ==========================================================
 
-    def _build_prompt(
+    def _build_cached_messages(
         self,
         natural_language_query: str,
         schema_context: str,
         tenant_id: str,
-    ) -> str:
-        db_context_str = get_db_context() or ""
+    ) -> tuple:
+        """
+        Returns (system_blocks, messages) with prompt cache markers.
 
+        Cache layout:
+          system_blocks[0]  — static instructions, cached globally
+          messages[0][0]    — schema + tenant context, cached per tenant/schema
+          messages[0][1]    — user query, always dynamic (no cache marker)
+        """
+        db_context_str = get_db_context() or ""
         custom = get_prompt_template()
+
         if custom and custom.strip():
-            # Do NOT use str.format() on the custom template: it contains JSON with
-            # literal braces (e.g. { "mode": ... }), which .format() would treat as
-            # placeholders and raise KeyError. Substitute only our known placeholders.
-            out = (
+            # For custom templates, split on {natural_language_query} so the
+            # static prefix is cached and only the query itself is dynamic.
+            rendered_prefix = (
                 custom.replace("{schema_context}", schema_context)
                 .replace("{tenant_id}", tenant_id)
-                .replace("{natural_language_query}", natural_language_query)
                 .replace("{db_context}", db_context_str)
             )
             if "{db_context}" not in custom and db_context_str.strip():
-                out = (
-                    out.rstrip()
+                rendered_prefix = (
+                    rendered_prefix.rstrip()
                     + "\n\nAdditional database context (from administrator):\n"
                     + db_context_str.strip()
                 )
-            return out.strip()
 
-        extra_block = ""
-        if db_context_str.strip():
-            extra_block = f"""Additional database context (from administrator):
-{db_context_str.strip()}
+            if "{natural_language_query}" in rendered_prefix:
+                parts = rendered_prefix.split("{natural_language_query}", 1)
+                system_blocks = [
+                    {"type": "text", "text": parts[0].strip(), "cache_control": {"type": "ephemeral"}}
+                ]
+                user_content = [
+                    {"type": "text", "text": f"{natural_language_query}{parts[1]}"}
+                ]
+            else:
+                # No placeholder found — treat whole template as cached context
+                system_blocks = [
+                    {"type": "text", "text": rendered_prefix.strip(), "cache_control": {"type": "ephemeral"}}
+                ]
+                user_content = [
+                    {"type": "text", "text": natural_language_query}
+                ]
 
-"""
+            messages = [{"role": "user", "content": user_content}]
+            return system_blocks, messages
 
-        return f"""
-You are an AI assistant for an asset-tracking system.
+        # --- Default prompt ---
+        static_instructions = """You are an AI assistant for an asset-tracking system.
 
 Decide how to respond to the user's message.
 
@@ -447,7 +461,7 @@ CRITICAL OUTPUT RULES:
 SQL rules (only if mode is sql):
 - Generate a SELECT query only.
 - Use the schema provided.
-- Always filter by accountId = "{tenant_id}".
+- The tenant filter (accountId) is specified in the context block below.
 - IMPORTANT: In SELECT columns, use human-friendly identifiers instead of cloudUUID:
   - Use serialNumber or description to identify assets/tags
   - If cloudUUID is needed for joins, use it internally but alias it as asset_number in the output
@@ -456,22 +470,35 @@ SQL rules (only if mode is sql):
   - Do NOT include cloudUUID as a visible output column
 
 Return JSON in exactly this format:
-{{
+{
   "mode": "chat | clarification | sql",
   "response": "Natural language response",
   "sql": "SQL query if mode is sql, otherwise null"
-}}
+}
 
-{extra_block}Database schema:
-{schema_context}
+IMPORTANT: Your response must start with '{' and end with '}'. If you include any text outside the JSON object, the request will fail."""
 
-User input:
-{natural_language_query}
+        extra_block = ""
+        if db_context_str.strip():
+            extra_block = f"\n\nAdditional database context (from administrator):\n{db_context_str.strip()}"
 
-IMPORTANT:
-Your response must start with '{{' and end with '}}'.
-If you include any text outside the JSON object, the request will fail.
-""".strip()
+        schema_block = f"Tenant filter: Always include WHERE accountId = '{tenant_id}' in SQL queries.\n\nDatabase schema:\n{schema_context}{extra_block}"
+
+        system_blocks = [
+            {"type": "text", "text": static_instructions, "cache_control": {"type": "ephemeral"}}
+        ]
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": schema_block, "cache_control": {"type": "ephemeral"}},
+                    {"type": "text", "text": f"User input:\n{natural_language_query}"},
+                ],
+            }
+        ]
+
+        return system_blocks, messages
 
     # ==========================================================
     # Response parsing helpers

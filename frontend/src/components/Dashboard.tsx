@@ -254,11 +254,16 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
 
   const handleStreamingSubmit = useCallback(async (query: string, sessionId: string) => {
     const assistantMsgId = (Date.now() + 1).toString();
-    setMessages(prev => [...prev, {
+
+    // Local mirror of the assistant message — updated alongside React state so
+    // we can pass the final value to saveConversation without reading from state
+    // (reading state inside a setState callback is a side-effect anti-pattern).
+    let localMsg: Message = {
       id: assistantMsgId, role: 'assistant', content: '',
       timestamp: new Date().toISOString(),
       isStreaming: true, thinkingSteps: [], data: [], columns: [],
-    }]);
+    };
+    setMessages(prev => [...prev, localMsg]);
 
     try {
       const token = await getAccessToken();
@@ -295,73 +300,68 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
 
           try {
             const data = JSON.parse(eventData);
-            setMessages(prev => prev.map(msg => {
-              if (msg.id !== assistantMsgId) return msg;
-              const updated = { ...msg };
+            // Apply the event to both localMsg and React state atomically.
+            const applyEvent = (msg: Message): Message => {
+              const u = { ...msg };
               switch (eventType) {
                 case 'thinking':
-                  updated.thinkingSteps = [data.message];
-                  updated.content = data.message;
+                  u.thinkingSteps = [data.message];
+                  u.content = data.message;
                   break;
                 case 'sql':
-                  updated.sql = data.sql;
-                  updated.explanation = data.explanation;
+                  u.sql = data.sql;
+                  u.explanation = data.explanation;
                   break;
                 case 'columns':
-                  updated.columns = data.columns;
+                  u.columns = data.columns;
                   break;
                 case 'data_row':
-                  updated.data = [...(updated.data || []), data.row];
-                  updated.rowCount = (updated.data?.length || 0);
+                  u.data = [...(u.data || []), data.row];
+                  u.rowCount = (u.data?.length || 0);
                   break;
                 case 'validation':
-                  updated.validation = { status: data.status, reasoning: data.reasoning };
+                  u.validation = { status: data.status, reasoning: data.reasoning };
                   break;
                 case 'done':
-                  updated.isStreaming = false;
-                  updated.dataWithheld = data.data_withheld === true;
-                  updated.clarificationMessage = data.clarification_message ?? undefined;
-                  if (updated.dataWithheld && updated.clarificationMessage) {
-                    updated.data = []; updated.columns = []; updated.rowCount = 0;
-                    updated.content = updated.clarificationMessage;
+                  u.isStreaming = false;
+                  u.dataWithheld = data.data_withheld === true;
+                  u.clarificationMessage = data.clarification_message ?? undefined;
+                  if (u.dataWithheld && u.clarificationMessage) {
+                    u.data = []; u.columns = []; u.rowCount = 0;
+                    u.content = u.clarificationMessage;
                     break;
                   }
-                  updated.rowCount = data.row_count ?? updated.data?.length ?? 0;
+                  u.rowCount = data.row_count ?? u.data?.length ?? 0;
                   if (data.mode !== 'sql' && data.message) {
-                    updated.content = data.message;
-                  } else if (updated.rowCount > 0) {
-                    updated.content = `Found ${updated.rowCount} result${updated.rowCount === 1 ? '' : 's'}.`;
-                  } else if (updated.rowCount === 0 && data.mode === 'sql') {
-                    updated.content = 'The query executed successfully but returned no results.';
+                    u.content = data.message;
+                  } else if (u.rowCount > 0) {
+                    u.content = `Found ${u.rowCount} result${u.rowCount === 1 ? '' : 's'}.`;
+                  } else if (u.rowCount === 0 && data.mode === 'sql') {
+                    u.content = 'The query executed successfully but returned no results.';
                   }
                   break;
                 case 'error':
-                  updated.isStreaming = false;
-                  updated.error = data.message;
-                  updated.content = `Error: ${data.message}`;
+                  u.isStreaming = false;
+                  u.error = data.message;
+                  u.content = `Error: ${data.message}`;
                   break;
               }
-              return updated;
-            }));
+              return u;
+            };
+            localMsg = applyEvent(localMsg);
+            setMessages(prev => prev.map(msg => msg.id === assistantMsgId ? applyEvent(msg) : msg));
           } catch { /* ignore parse errors */ }
         }
       }
 
-      // Save to DB after stream ends
-      setMessages(prev => {
-        const finalMsg = prev.find(m => m.id === assistantMsgId);
-        if (finalMsg && !finalMsg.error) {
-          saveConversation(sessionId, query, finalMsg);
-        }
-        return prev;
-      });
+      // Stream finished — save the final state we tracked locally (no state read needed).
+      if (!localMsg.error) {
+        saveConversation(sessionId, query, localMsg);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'An unexpected error occurred';
-      setMessages(prev => prev.map(m =>
-        m.id === assistantMsgId
-          ? { ...m, isStreaming: false, error: msg, content: `Error: ${msg}` }
-          : m
-      ));
+      localMsg = { ...localMsg, isStreaming: false, error: msg, content: `Error: ${msg}` };
+      setMessages(prev => prev.map(m => m.id === assistantMsgId ? localMsg : m));
     }
   }, [getAccessToken, activeTenantId, saveConversation]);
 

@@ -2,13 +2,12 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import {
   Send, Loader2, User, Code, AlertCircle, UserCircle,
-  FileText, BarChart3, LogOut, CheckCircle, AlertTriangle, XCircle,
+  FileText, LogOut, CheckCircle, AlertTriangle, XCircle,
   Download, Shield, Plus, Trash2, MessageSquare,
 } from 'lucide-react';
 import { API_ENDPOINTS, DEFAULT_TENANT_ID, SHOW_SQL_UI } from '../config';
 import { getAuthHeadersWithToken } from '../utils/auth';
 import LogsViewer from './LogsViewer';
-import AnalyticsDashboard from './AnalyticsDashboard';
 import AdminDashboard from './AdminDashboard';
 
 interface ValidationInfo {
@@ -65,7 +64,6 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
   // UI state
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
-  const [showAnalytics, setShowAnalytics] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [sampleQuestions, setSampleQuestions] = useState<string[]>([
@@ -603,13 +601,6 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
           {isAdmin && (
             <>
               <button
-                onClick={() => setShowAnalytics(true)}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-colors"
-              >
-                <BarChart3 className="w-4 h-4" />
-                Analytics
-              </button>
-              <button
                 onClick={() => setShowLogs(true)}
                 className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-colors"
               >
@@ -814,7 +805,6 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
 
       {/* Modals */}
       {showLogs && <LogsViewer onClose={() => setShowLogs(false)} />}
-      {showAnalytics && <AnalyticsDashboard onClose={() => setShowAnalytics(false)} getAccessToken={getAccessToken} />}
     </div>
   );
 };

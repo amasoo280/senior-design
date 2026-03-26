@@ -1,5 +1,10 @@
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Load backend/.env regardless of process cwd (uvicorn may run from repo root).
+_BACKEND_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,9 +20,9 @@ if USE_V2_CONFIG:
     # =============================
     class Settings(BaseSettings):
         model_config = SettingsConfigDict(
-            env_file=".env",
+            env_file=_BACKEND_ENV_FILE,
             env_file_encoding="utf-8",
-            extra="allow"
+            extra="allow",
         )
 
         # -----------------------------
@@ -58,8 +63,9 @@ if USE_V2_CONFIG:
         # Frontend URL for CORS
         frontend_url: str = Field("http://localhost:5173", env="FRONTEND_URL")
         
-        # Admin emails (comma-separated list)
-        admin_emails_raw: str | None = Field(None, env="ADMIN_EMAILS")
+        # Admin emails (comma-separated). Must use validation_alias: env file key is ADMIN_EMAILS,
+        # not ADMIN_EMAILS_RAW (Pydantic v2 ignores Field(..., env=...) for settings).
+        admin_emails_raw: str | None = Field(default=None, validation_alias="ADMIN_EMAILS")
         
         @property
         def admin_emails(self) -> list[str]:
@@ -75,7 +81,7 @@ else:
     # =============================
     class Settings(BaseSettings):
         class Config:
-            env_file = ".env"
+            env_file = str(_BACKEND_ENV_FILE)
             env_file_encoding = "utf-8"
             extra = "allow"
 

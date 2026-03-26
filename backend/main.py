@@ -11,6 +11,7 @@ from botocore.exceptions import ClientError
 
 from app.bedrock.client import BedrockClient
 from app.config import settings
+from app.debug_agent_log import agent_log
 from app.executor.executor import execute_query, DatabaseExecutionError
 from app.logging.logger import (
     get_logger,
@@ -38,7 +39,12 @@ from app.schema.context import SchemaContext
 from app.sanitize_thinking import sanitize_thinking_text
 
 # Auth0 authentication
-from app.auth import get_current_user, get_optional_user, require_admin
+from app.auth import (
+    get_current_user,
+    get_optional_user,
+    require_admin,
+    user_email_matches_admin_allowlist,
+)
 from app.admin_config import (
     get_guardrails_config,
     set_guardrails_config,
@@ -176,12 +182,24 @@ def get_current_user_info(user: dict = Depends(get_current_user)):
     Includes is_admin for frontend to show/hide admin features.
     """
     permissions = user.get("permissions", [])
-    email = user.get("email", "unknown")
+    admin_email_match = user_email_matches_admin_allowlist(user)
     is_admin = (
         "admin" in permissions
         or "admin:all" in permissions
-        or (settings.admin_emails and email.lower() in [e.lower().strip() for e in settings.admin_emails])
+        or admin_email_match
     )
+    # region agent log
+    agent_log(
+        "C",
+        "main.py:get_current_user_info",
+        "is_admin computed",
+        {
+            "is_admin": bool(is_admin),
+            "from_permissions": "admin" in permissions or "admin:all" in permissions,
+            "from_admin_emails": admin_email_match,
+        },
+    )
+    # endregion
     return {"user": {**user, "is_admin": is_admin}}
 
 @app.get("/auth/verify")

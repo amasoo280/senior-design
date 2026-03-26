@@ -82,6 +82,19 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
         const res = await fetch(API_ENDPOINTS.me, {
           headers: getAuthHeadersWithToken(accessToken),
         });
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/d2557352-c182-47ae-907f-9ce5199c59ef', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'Dashboard.tsx:/auth/me',
+            message: 'auth me response',
+            data: { ok: res.ok, status: res.status },
+            timestamp: Date.now(),
+            hypothesisId: 'A',
+          }),
+        }).catch(() => {});
+        // #endregion
         if (res.ok) {
           const data = await res.json();
           setIsAdmin(data.user?.is_admin === true);

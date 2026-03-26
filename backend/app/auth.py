@@ -6,6 +6,7 @@ No local secret needed - Auth0's public keys are fetched automatically.
 Fetches userinfo from Auth0 when the access token does not include email (common for API tokens).
 """
 import json
+import time
 from typing import Optional
 from urllib.request import Request, urlopen
 
@@ -14,6 +15,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.config import settings
+from app.debug_agent_log import agent_log
 from app.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -23,6 +25,35 @@ security = HTTPBearer()
 
 # Cache for JWKS
 _jwks_cache = None
+
+# Last-known email per Auth0 sub (userinfo/JWT); softens bursts of userinfo 429
+_userinfo_email_by_sub: dict[str, tuple[float, str]] = {}
+_USERINFO_EMAIL_CACHE_TTL_SEC = 900
+
+
+def _cache_email_for_sub(sub: Optional[str], email: Optional[str]) -> None:
+    if not sub or email is None:
+        return
+    em = str(email).strip()
+    if not em:
+        return
+    _userinfo_email_by_sub[sub] = (
+        time.monotonic() + _USERINFO_EMAIL_CACHE_TTL_SEC,
+        em,
+    )
+
+
+def _cached_email_for_sub(sub: Optional[str]) -> Optional[str]:
+    if not sub:
+        return None
+    hit = _userinfo_email_by_sub.get(sub)
+    if not hit:
+        return None
+    expiry_mono, em = hit
+    if time.monotonic() > expiry_mono:
+        _userinfo_email_by_sub.pop(sub, None)
+        return None
+    return em
 
 
 def _get_jwks() -> dict:
@@ -55,6 +86,21 @@ def _verify_auth0_token(token: str) -> dict:
         # Get the token header to find the key ID
         unverified_header = jwt.get_unverified_header(token)
 
+        # region agent log
+        jwks_keys = jwks.get("keys", [])
+        agent_log(
+            "A",
+            "auth.py:_verify_auth0_token",
+            "jwt header vs jwks",
+            {
+                "header_kid": unverified_header.get("kid"),
+                "header_alg": unverified_header.get("alg"),
+                "jwks_key_count": len(jwks_keys),
+                "auth0_domain_configured": bool(getattr(settings, "auth0_domain", None)),
+            },
+        )
+        # endregion
+
         # Find the matching key
         rsa_key = {}
         for key in jwks.get("keys", []):
@@ -69,6 +115,14 @@ def _verify_auth0_token(token: str) -> dict:
                 break
 
         if not rsa_key:
+            # region agent log
+            agent_log(
+                "A",
+                "auth.py:_verify_auth0_token",
+                "no rsa_key kid match",
+                {"jwks_kids_sample": [k.get("kid") for k in jwks_keys[:5]]},
+            )
+            # endregion
             logger.warning("Unable to find matching Auth0 signing key")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -95,6 +149,14 @@ def _verify_auth0_token(token: str) -> dict:
                     audience=aud,
                     issuer=issuer,
                 )
+                # region agent log
+                agent_log(
+                    "D",
+                    "auth.py:_verify_auth0_token",
+                    "jwt verified with audience",
+                    {"audience_len": len(aud)},
+                )
+                # endregion
                 return payload
             except JWTError as e:
                 last_error = e
@@ -113,11 +175,27 @@ def _verify_auth0_token(token: str) -> dict:
                 "Auth0 token accepted without audience verification "
                 "(development fallback – ensure AUTH0_AUDIENCE is set correctly for production)."
             )
+            # region agent log
+            agent_log(
+                "D",
+                "auth.py:_verify_auth0_token",
+                "jwt verified issuer_only verify_aud false",
+                {},
+            )
+            # endregion
             return payload
         except JWTError as e:
             last_error = e
 
         if last_error:
+            # region agent log
+            agent_log(
+                "D",
+                "auth.py:_verify_auth0_token",
+                "jwt decode failed after rsa match",
+                {"error_type": type(last_error).__name__},
+            )
+            # endregion
             logger.warning(f"Auth0 token verification failed: {last_error}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -181,6 +259,15 @@ def get_current_user(
                 name = userinfo.get("name")
             if not payload.get("picture") and userinfo.get("picture"):
                 payload = {**payload, "picture": userinfo.get("picture")}
+
+    sub = payload.get("sub")
+    if isinstance(sub, str):
+        if email:
+            _cache_email_for_sub(sub, email)
+        else:
+            cached = _cached_email_for_sub(sub)
+            if cached:
+                email = cached
     
     user_info = {
         "sub": payload.get("sub"),
@@ -189,7 +276,26 @@ def get_current_user(
         "picture": payload.get("picture"),
         "permissions": payload.get("permissions", []),
     }
-    
+
+    # region agent log
+    perms = user_info.get("permissions") or []
+    em = (email or "").strip().lower()
+    admin_list = settings.admin_emails or []
+    agent_log(
+        "B",
+        "auth.py:get_current_user",
+        "user claims snapshot",
+        {
+            "email_claim_present": bool(em),
+            "permissions_count": len(perms) if isinstance(perms, list) else -1,
+            "admin_emails_config_count": len(admin_list),
+            "email_matches_admin_list": bool(
+                em and admin_list and em in [e.lower().strip() for e in admin_list]
+            ),
+        },
+    )
+    # endregion
+
     return user_info
 
 
@@ -211,6 +317,18 @@ def get_optional_user(
         return None
 
 
+def user_email_matches_admin_allowlist(user: dict) -> bool:
+    """True if user email is in settings.admin_emails. Missing or non-string email never matches."""
+    admins = settings.admin_emails or []
+    if not admins:
+        return False
+    raw = user.get("email")
+    if raw is None or not isinstance(raw, str) or not raw.strip():
+        return False
+    normalized = raw.strip().lower()
+    return normalized in {e.strip().lower() for e in admins if e and str(e).strip()}
+
+
 def require_admin(user: dict = Depends(get_current_user)) -> dict:
     """
     FastAPI dependency to require admin role.
@@ -219,17 +337,17 @@ def require_admin(user: dict = Depends(get_current_user)) -> dict:
     Configure roles in Auth0 Dashboard > User Management > Roles.
     """
     permissions = user.get("permissions", [])
-    email = user.get("email", "unknown")
-    
-    # Check Auth0 permissions or admin emails from config
+    admin_email_match = user_email_matches_admin_allowlist(user)
     is_admin = (
         "admin" in permissions
         or "admin:all" in permissions
-        or (settings.admin_emails and email.lower() in [e.lower().strip() for e in settings.admin_emails])
+        or admin_email_match
     )
     
     if not is_admin:
-        logger.warning(f"Access denied for non-admin user: {email}")
+        logger.warning(
+            f"Access denied for non-admin user: {user.get('email') or 'unknown'}"
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",

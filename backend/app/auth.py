@@ -149,43 +149,10 @@ def _verify_auth0_token(token: str) -> dict:
                     audience=aud,
                     issuer=issuer,
                 )
-                # region agent log
-                agent_log(
-                    "D",
-                    "auth.py:_verify_auth0_token",
-                    "jwt verified with audience",
-                    {"audience_len": len(aud)},
-                )
-                # endregion
                 return payload
             except JWTError as e:
                 last_error = e
                 continue
-        # As a development fallback, try verifying without audience check.
-        # This is safe enough for local use because we still verify issuer and signature.
-        try:
-            payload = jwt.decode(
-                token,
-                rsa_key,
-                algorithms=["RS256"],
-                issuer=issuer,
-                options={"verify_aud": False},
-            )
-            logger.warning(
-                "Auth0 token accepted without audience verification "
-                "(development fallback – ensure AUTH0_AUDIENCE is set correctly for production)."
-            )
-            # region agent log
-            agent_log(
-                "D",
-                "auth.py:_verify_auth0_token",
-                "jwt verified issuer_only verify_aud false",
-                {},
-            )
-            # endregion
-            return payload
-        except JWTError as e:
-            last_error = e
 
         if last_error:
             # region agent log

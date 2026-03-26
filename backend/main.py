@@ -45,7 +45,15 @@ from app.auth import (
     require_admin,
     user_email_matches_admin_allowlist,
 )
-from app.history import init_conversations_table, save_conversation, get_conversations
+from app.history import (
+    init_conversations_table,
+    create_session,
+    get_sessions,
+    delete_session,
+    update_session_title,
+    save_conversation,
+    get_conversations,
+)
 from app.admin_config import (
     get_guardrails_config,
     set_guardrails_config,
@@ -387,7 +395,13 @@ def admin_get_logs(
 # Conversation History Endpoints
 # ============================================
 
+class CreateSessionRequest(BaseModel):
+    tenant_id: str
+    title: str = "New Chat"
+
+
 class SaveConversationRequest(BaseModel):
+    session_id: str
     tenant_id: str
     query: str
     mode: Optional[str] = None
@@ -396,29 +410,86 @@ class SaveConversationRequest(BaseModel):
     row_count: int = 0
 
 
-@app.get("/history")
-def get_history(
+class UpdateSessionTitleRequest(BaseModel):
+    title: str
+
+
+@app.post("/sessions")
+def post_session(body: CreateSessionRequest, user: dict = Depends(get_current_user)):
+    """Create a new chat session."""
+    session_id = create_session(
+        tenant_id=body.tenant_id,
+        user_sub=user.get("sub", ""),
+        title=body.title,
+    )
+    return {"session_id": session_id}
+
+
+@app.get("/sessions")
+def get_sessions_endpoint(
     tenant_id: str,
     limit: int = 50,
     user: dict = Depends(get_current_user),
 ):
-    """Return conversation history for the current user scoped to tenant_id."""
-    limit = min(limit, 200)
-    user_sub = user.get("sub", "")
-    conversations = get_conversations(tenant_id=tenant_id, user_sub=user_sub, limit=limit)
+    """List chat sessions for the current user, newest first."""
+    sessions = get_sessions(
+        tenant_id=tenant_id,
+        user_sub=user.get("sub", ""),
+        limit=min(limit, 100),
+    )
+    return {"sessions": sessions}
+
+
+@app.delete("/sessions/{session_id}")
+def delete_session_endpoint(
+    session_id: str,
+    tenant_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Delete a session and all its messages."""
+    deleted = delete_session(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        user_sub=user.get("sub", ""),
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"deleted": True}
+
+
+@app.put("/sessions/{session_id}/title")
+def put_session_title(
+    session_id: str,
+    body: UpdateSessionTitleRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Update a session's title."""
+    update_session_title(session_id=session_id, title=body.title)
+    return {"updated": True}
+
+
+@app.get("/history")
+def get_history(
+    session_id: str,
+    tenant_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return all messages for a given session."""
+    conversations = get_conversations(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        user_sub=user.get("sub", ""),
+    )
     return {"conversations": conversations, "count": len(conversations)}
 
 
 @app.post("/history")
-def post_history(
-    body: SaveConversationRequest,
-    user: dict = Depends(get_current_user),
-):
+def post_history(body: SaveConversationRequest, user: dict = Depends(get_current_user)):
     """Save a completed conversation turn."""
-    user_sub = user.get("sub", "")
     conv_id = save_conversation(
+        session_id=body.session_id,
         tenant_id=body.tenant_id,
-        user_sub=user_sub,
+        user_sub=user.get("sub", ""),
         query=body.query,
         mode=body.mode,
         response=body.response,

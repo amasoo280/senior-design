@@ -17,6 +17,9 @@ export const API_ENDPOINTS = {
   // App endpoints
   ask: `${API_BASE_URL}/ask`,
   askStream: `${API_BASE_URL}/ask/stream`,
+  sessions: `${API_BASE_URL}/sessions`,
+  session: (id: string) => `${API_BASE_URL}/sessions/${encodeURIComponent(id)}`,
+  sessionTitle: (id: string) => `${API_BASE_URL}/sessions/${encodeURIComponent(id)}/title`,
   history: `${API_BASE_URL}/history`,
   health: `${API_BASE_URL}/health`,
   dbPing: `${API_BASE_URL}/db-ping`,

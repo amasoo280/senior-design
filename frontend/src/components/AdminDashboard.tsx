@@ -286,14 +286,14 @@ export default function AdminDashboard({ onClose, getAccessToken, user }: AdminD
 
   if (loading && !totals) {
     return (
-      <div className="min-h-screen bg-[#0f0f23] flex items-center justify-center">
+      <div className="h-screen bg-[#0f0f23] flex items-center justify-center">
         <div className="text-slate-400">Loading admin dashboard...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0f0f23] text-white flex flex-col">
+    <div className="h-screen bg-[#0f0f23] text-white flex flex-col overflow-hidden">
       {/* Top bar */}
       <div className="flex items-center justify-between px-4 py-4 border-b border-slate-800 bg-[#0f0f23]">
         <h2 className="text-xl font-semibold text-white flex items-center gap-2">
@@ -477,17 +477,17 @@ export default function AdminDashboard({ onClose, getAccessToken, user }: AdminD
           </div>
         )}
 
-        {/* Section 1: Prompt & LLM — flex column so prompt editor can fill remaining viewport */}
+        {/* Section 1: Prompt & LLM */}
         {activeSection === 'guardrails' && (
-          <div className="flex flex-col flex-1 min-h-0 gap-6">
-            <h3 className="text-lg font-semibold text-white shrink-0">Prompt & LLM configuration</h3>
+          <div className="space-y-6">
+            <h3 className="text-lg font-semibold text-white">Prompt & LLM configuration</h3>
 
-            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 flex flex-col flex-1 min-h-0">
-              <h4 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2 shrink-0">
+            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 flex flex-col">
+              <h4 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2">
                 <FileText className="w-4 h-4" />
                 Database context
               </h4>
-              <p className="text-xs text-slate-500 mb-3 shrink-0">
+              <p className="text-xs text-slate-500 mb-3">
                 Optional notes for the model: enum values, column meanings, or business rules not obvious from the schema.
                 Example: locationType 0 = warehouse, 1 = truck, 2 = on job site. Injected into every NL→SQL prompt (built-in
                 or custom). Custom templates can use {'{db_context}'}.
@@ -508,12 +508,12 @@ export default function AdminDashboard({ onClose, getAccessToken, user }: AdminD
               </button>
             </div>
 
-            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 flex flex-col flex-1 min-h-0">
-              <h4 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2 shrink-0">
+            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 flex flex-col">
+              <h4 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2">
                 <FileText className="w-4 h-4" />
                 LLM prompt template
               </h4>
-              <p className="text-xs text-slate-500 mb-3 shrink-0">
+              <p className="text-xs text-slate-500 mb-3">
                 Use placeholders: {'{schema_context}'}, {'{tenant_id}'}, {'{natural_language_query}'}, {'{db_context}'}.
                 Leave empty to use built-in prompt.
               </p>
@@ -521,7 +521,7 @@ export default function AdminDashboard({ onClose, getAccessToken, user }: AdminD
                 value={promptTemplate}
                 onChange={(e) => setPromptTemplate(e.target.value)}
                 placeholder="Optional custom prompt template..."
-                className="w-full min-h-[12rem] h-[clamp(12rem,calc(100vh-22rem),36rem)] bg-slate-900 border border-slate-600 rounded px-3 py-2 text-white text-sm font-mono resize-y overflow-y-auto"
+                className="w-full min-h-[14rem] h-64 bg-slate-900 border border-slate-600 rounded px-3 py-2 text-white text-sm font-mono resize-y overflow-y-auto"
               />
               <button
                 onClick={handleSavePrompt}

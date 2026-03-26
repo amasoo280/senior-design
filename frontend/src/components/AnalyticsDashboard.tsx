@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, RefreshCw, TrendingUp, AlertCircle, Database, MessageSquare, Clock, CheckCircle } from 'lucide-react';
 import { API_ENDPOINTS } from '../config';
-import { getAuthHeaders } from '../utils/auth';
+import { getAuthHeadersWithToken } from '../utils/auth';
 
 interface AnalyticsData {
   summary: {
@@ -33,9 +33,10 @@ interface AnalyticsData {
 
 interface AnalyticsDashboardProps {
   onClose: () => void;
+  getAccessToken: () => Promise<string>;
 }
 
-const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ onClose }) => {
+const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ onClose, getAccessToken }) => {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
@@ -43,8 +44,9 @@ const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ onClose }) => {
   const fetchAnalytics = async () => {
     try {
       setIsLoading(true);
+      const accessToken = await getAccessToken();
       const response = await fetch(API_ENDPOINTS.analytics, {
-        headers: getAuthHeaders(),
+        headers: getAuthHeadersWithToken(accessToken),
       });
       if (!response.ok) {
         throw new Error('Failed to fetch analytics');
@@ -60,14 +62,14 @@ const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ onClose }) => {
 
   useEffect(() => {
     fetchAnalytics();
-  }, []);
+  }, [getAccessToken]);
 
   useEffect(() => {
     if (autoRefresh) {
-      const interval = setInterval(fetchAnalytics, 5000); // Refresh every 5 seconds
+      const interval = setInterval(fetchAnalytics, 5000);
       return () => clearInterval(interval);
     }
-  }, [autoRefresh]);
+  }, [autoRefresh, getAccessToken]);
 
   if (isLoading && !data) {
     return (

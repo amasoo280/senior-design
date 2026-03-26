@@ -34,6 +34,7 @@ if USE_V2_CONFIG:
         db_password: str = Field(..., env="DB_PASSWORD")
         db_name: str = Field(..., env="DB_NAME")
         db_query_timeout_seconds: int = Field(30, env="DB_QUERY_TIMEOUT_SECONDS")
+        db_max_result_rows: int = Field(500, env="DB_MAX_RESULT_ROWS")
 
         # -----------------------------
         # AWS / Bedrock Settings
@@ -48,6 +49,15 @@ if USE_V2_CONFIG:
 
         # Optional tenant
         default_tenant_id: str | None = Field(None, env="DEFAULT_TENANT_ID")
+
+        # Comma-separated list of allowed tenant UUIDs (overrides hardcoded default in admin_config.py)
+        allowed_tenant_ids_raw: str | None = Field(default=None, validation_alias="ALLOWED_TENANT_IDS")
+
+        @property
+        def allowed_tenant_ids(self) -> list[str]:
+            if not self.allowed_tenant_ids_raw:
+                return []
+            return [t.strip() for t in self.allowed_tenant_ids_raw.split(',') if t.strip()]
 
         # Logging configuration
         log_level: str = Field("INFO", env="LOG_LEVEL")
@@ -94,6 +104,7 @@ else:
         db_password: str
         db_name: str
         db_query_timeout_seconds: int = 30
+        db_max_result_rows: int = 500
 
         # -----------------------------
         # AWS
@@ -105,6 +116,15 @@ else:
         bedrock_model_id: str | None = Field(None, env="BEDROCK_MODEL_ID")
 
         default_tenant_id: str | None = None
+
+        # Comma-separated list of allowed tenant UUIDs
+        allowed_tenant_ids_raw: str | None = None
+
+        @property
+        def allowed_tenant_ids(self) -> list[str]:
+            if not self.allowed_tenant_ids_raw:
+                return []
+            return [t.strip() for t in self.allowed_tenant_ids_raw.split(',') if t.strip()]
 
         # Logging configuration
         log_level: str = "INFO"

@@ -44,20 +44,34 @@ _bedrock_call_times: List[float] = []
 
 # Time-based tracking (last 24 hours)
 _start_time = datetime.now()
-_hourly_requests: Dict[int, int] = defaultdict(int)  # hour -> count
-_hourly_errors: Dict[int, int] = defaultdict(int)  # hour -> count
+_hourly_requests: Dict[str, int] = defaultdict(int)  # "YYYY-MM-DD HH" -> count
+_hourly_errors: Dict[str, int] = defaultdict(int)    # "YYYY-MM-DD HH" -> count
 
 
-def _get_current_hour() -> int:
-    """Get current hour as integer (0-23)."""
-    return datetime.now().hour
+def _get_current_hour_key() -> str:
+    """Return a date-qualified hour key like '2026-03-26 14' to avoid midnight wrapping."""
+    return datetime.now().strftime("%Y-%m-%d %H")
 
 
 def _cleanup_old_data():
     """Remove data older than 24 hours."""
-    global _query_execution_times, _bedrock_call_times
-    cutoff_time = datetime.now() - timedelta(hours=24)
-    
+    global _query_execution_times, _bedrock_call_times, _hourly_requests, _hourly_errors
+    cutoff = datetime.now() - timedelta(hours=24)
+
+    # Prune hourly buckets older than 24 hours
+    for key in list(_hourly_requests.keys()):
+        try:
+            if datetime.strptime(key, "%Y-%m-%d %H") < cutoff:
+                del _hourly_requests[key]
+        except ValueError:
+            del _hourly_requests[key]
+    for key in list(_hourly_errors.keys()):
+        try:
+            if datetime.strptime(key, "%Y-%m-%d %H") < cutoff:
+                del _hourly_errors[key]
+        except ValueError:
+            del _hourly_errors[key]
+
     # Keep only recent performance data (last 1000 entries)
     if len(_query_execution_times) > 1000:
         _query_execution_times = _query_execution_times[-1000:]
@@ -70,8 +84,7 @@ def increment_request_count(tenant_id: Optional[str] = None) -> None:
     global _total_requests
     with _metrics_lock:
         _total_requests += 1
-        hour = _get_current_hour()
-        _hourly_requests[hour] += 1
+        _hourly_requests[_get_current_hour_key()] += 1
         if tenant_id:
             _by_tenant[tenant_id]["requests"] += 1
 
@@ -82,8 +95,7 @@ def increment_error_count(error_type: str = "unknown", tenant_id: Optional[str] 
     with _metrics_lock:
         _total_errors += 1
         _error_counts[error_type] += 1
-        hour = _get_current_hour()
-        _hourly_errors[hour] += 1
+        _hourly_errors[_get_current_hour_key()] += 1
         if tenant_id:
             _by_tenant[tenant_id]["errors"] += 1
             _by_tenant_errors[tenant_id][error_type] += 1
@@ -181,17 +193,18 @@ def get_metrics() -> Dict[str, Any]:
             if _total_requests > 0 else 0
         )
         
-        # Get hourly data for last 24 hours
+        # Get hourly data for last 24 hours (oldest → newest)
+        now = datetime.now()
         hourly_data = []
-        current_hour = _get_current_hour()
-        for i in range(24):
-            hour = (current_hour - i) % 24
+        for i in range(23, -1, -1):
+            slot = now - timedelta(hours=i)
+            key = slot.strftime("%Y-%m-%d %H")
             hourly_data.append({
-                "hour": hour,
-                "requests": _hourly_requests.get(hour, 0),
-                "errors": _hourly_errors.get(hour, 0),
+                "hour": slot.hour,
+                "label": key,
+                "requests": _hourly_requests.get(key, 0),
+                "errors": _hourly_errors.get(key, 0),
             })
-        hourly_data.reverse()  # Oldest to newest
         
         uptime_seconds = (datetime.now() - _start_time).total_seconds()
         uptime_hours = uptime_seconds / 3600

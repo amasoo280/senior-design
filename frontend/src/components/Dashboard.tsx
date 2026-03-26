@@ -82,19 +82,6 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
         const res = await fetch(API_ENDPOINTS.me, {
           headers: getAuthHeadersWithToken(accessToken),
         });
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/d2557352-c182-47ae-907f-9ce5199c59ef', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'Dashboard.tsx:/auth/me',
-            message: 'auth me response',
-            data: { ok: res.ok, status: res.status },
-            timestamp: Date.now(),
-            hypothesisId: 'A',
-          }),
-        }).catch(() => {});
-        // #endregion
         if (res.ok) {
           const data = await res.json();
           setIsAdmin(data.user?.is_admin === true);
@@ -462,14 +449,16 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
             <BarChart3 className="w-5 h-5 text-slate-400" />
             <span className="text-sm text-slate-300">Analytics</span>
           </button>
-          <button
-            onClick={() => setShowLogs(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
-            title="View Application Logs"
-          >
-            <FileText className="w-5 h-5 text-slate-400" />
-            <span className="text-sm text-slate-300">Logs</span>
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => setShowLogs(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+              title="View Application Logs"
+            >
+              <FileText className="w-5 h-5 text-slate-400" />
+              <span className="text-sm text-slate-300">Logs</span>
+            </button>
+          )}
           {isAdmin && (
             <button
               onClick={() => onOpenAdmin && onOpenAdmin()}
@@ -711,7 +700,7 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
       {showLogs && <LogsViewer onClose={() => setShowLogs(false)} />}
 
       {/* Analytics Dashboard Modal */}
-      {showAnalytics && <AnalyticsDashboard onClose={() => setShowAnalytics(false)} />}
+      {showAnalytics && <AnalyticsDashboard onClose={() => setShowAnalytics(false)} getAccessToken={getAccessToken} />}
     </div>
   );
 };

@@ -17,12 +17,23 @@ _BACKEND_ROOT = Path(__file__).resolve().parent.parent
 _CONFIG_DIR = _BACKEND_ROOT / "data"
 _CONFIG_PATH = _CONFIG_DIR / "admin_config.json"
 
+
+def _default_allowed_tenant_ids() -> list[str]:
+    """
+    Read allowed tenant IDs from ALLOWED_TENANT_IDS env var first.
+    Falls back to admin_config.json, then to an empty list.
+    Tenant IDs should never be hardcoded in source.
+    """
+    from app.config import settings  # local import to avoid circular dependency
+    ids = settings.allowed_tenant_ids
+    if ids:
+        return ids
+    return []
+
+
 # Default guardrails (match current SQLGuardrails)
 DEFAULT_GUARDRAILS = {
-    "allowed_tenant_ids": [
-        "c55b3c70-7aa7-11eb-a7e8-9b4baf296adf",
-        "eaeddcf1-fb98-11eb-94c9-b1e578657155",
-    ],
+    "allowed_tenant_ids": [],  # populated at runtime via _default_allowed_tenant_ids()
     "dangerous_keywords": [
         "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE",
         "TRUNCATE", "EXEC", "EXECUTE", "MERGE", "GRANT", "REVOKE",
@@ -85,7 +96,7 @@ def get_guardrails_config() -> dict:
     raw = _read_raw()
     guardrails = raw.get("guardrails") or {}
     return {
-        "allowed_tenant_ids": guardrails.get("allowed_tenant_ids") or DEFAULT_GUARDRAILS["allowed_tenant_ids"],
+        "allowed_tenant_ids": guardrails.get("allowed_tenant_ids") or _default_allowed_tenant_ids(),
         "dangerous_keywords": guardrails.get("dangerous_keywords") or DEFAULT_GUARDRAILS["dangerous_keywords"],
         "sql_injection_patterns": guardrails.get("sql_injection_patterns") or DEFAULT_GUARDRAILS["sql_injection_patterns"],
         "tenant_column": guardrails.get("tenant_column") or DEFAULT_GUARDRAILS["tenant_column"],

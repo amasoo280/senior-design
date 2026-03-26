@@ -7,25 +7,6 @@ export const AUTH0_CLIENT_ID = import.meta.env.VITE_AUTH0_CLIENT_ID || '';
 /** Only set via VITE_AUTH0_AUDIENCE — must match an API Identifier in Auth0 (APIs). If unset, no audience is sent (avoids "Service not found"). */
 export const AUTH0_AUDIENCE = (import.meta.env.VITE_AUTH0_AUDIENCE || '').trim();
 
-// #region agent log
-fetch('http://127.0.0.1:7242/ingest/d2557352-c182-47ae-907f-9ce5199c59ef', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    location: 'config.ts:AUTH0',
-    message: 'vite auth0 env snapshot',
-    data: {
-      audienceConfigured: AUTH0_AUDIENCE.length > 0,
-      audienceLen: AUTH0_AUDIENCE.length,
-      domainLen: AUTH0_DOMAIN.length,
-      clientIdLen: AUTH0_CLIENT_ID.length,
-    },
-    timestamp: Date.now(),
-    hypothesisId: 'E',
-  }),
-}).catch(() => {});
-// #endregion
-
 // API endpoints
 export const API_ENDPOINTS = {
   // Auth endpoints

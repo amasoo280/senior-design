@@ -71,12 +71,20 @@ def execute_query(
                 pass
             
             result: Result = conn.execute(text(sql), params)
-            rows = result.fetchall()
+            rows = result.fetchmany(settings.db_max_result_rows + 1)
+            truncated = len(rows) > settings.db_max_result_rows
+            if truncated:
+                rows = rows[:settings.db_max_result_rows]
             row_count = len(rows)
-            
+
+            if truncated:
+                logger.warning(
+                    f"Query result truncated to {settings.db_max_result_rows} rows (limit: DB_MAX_RESULT_ROWS)"
+                )
+
             # Log: Number of rows returned (helps debug query results)
-            logger.info(f"Query executed successfully | rows_returned={row_count}")
-            
+            logger.info(f"Query executed successfully | rows_returned={row_count} | truncated={truncated}")
+
             return [dict(row._mapping) for row in rows]
     except SQLTimeoutError as exc:
         # Log: Query timeout errors (ERROR level)

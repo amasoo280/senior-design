@@ -206,6 +206,8 @@ class BedrockClient:
                 pass
 
             accumulated_text = ""
+            input_tokens = 0
+            output_tokens = 0
 
             for event in response.get("body", []):
                 chunk = event.get("chunk")
@@ -225,8 +227,18 @@ class BedrockClient:
 
                 event_type = payload.get("type")
 
+                # Capture input token count from message_start
+                if event_type == "message_start":
+                    usage = payload.get("message", {}).get("usage", {})
+                    input_tokens = usage.get("input_tokens", 0)
+
+                # Capture output token count from message_delta
+                elif event_type == "message_delta":
+                    usage = payload.get("usage", {})
+                    output_tokens = usage.get("output_tokens", 0)
+
                 # Thinking deltas
-                if event_type == "content_block_delta":
+                elif event_type == "content_block_delta":
                     delta = payload.get("delta", {})
                     delta_type = delta.get("type")
 
@@ -263,8 +275,7 @@ class BedrockClient:
                 "sql": sql,
                 "explanation": model_output.get("explanation"),
                 "model_id": self.model_id,
-                # Usage is not currently returned in streaming responses.
-                "usage": {},
+                "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
             }
 
             yield {"event": "final", "result": result}

@@ -45,6 +45,7 @@ from app.auth import (
     require_admin,
     user_email_matches_admin_allowlist,
 )
+from app.history import init_conversations_table, save_conversation, get_conversations
 from app.admin_config import (
     get_guardrails_config,
     set_guardrails_config,
@@ -84,6 +85,12 @@ app.add_middleware(
 # Initialize components
 bedrock_client = BedrockClient()
 schema_context = SchemaContext()
+
+# Create conversations table on startup (no-op if already exists)
+try:
+    init_conversations_table()
+except Exception as _e:
+    logger.warning(f"Could not initialise conversations table: {_e}")
 
 
 # ============================================
@@ -374,6 +381,51 @@ def admin_get_logs(
     limit = min(limit, 500)
     logs = get_logs(limit=limit, level=level, tenant_id=tenant_id)
     return {"logs": logs, "count": len(logs)}
+
+
+# ============================================
+# Conversation History Endpoints
+# ============================================
+
+class SaveConversationRequest(BaseModel):
+    tenant_id: str
+    query: str
+    mode: Optional[str] = None
+    response: Optional[str] = None
+    sql_generated: Optional[str] = None
+    row_count: int = 0
+
+
+@app.get("/history")
+def get_history(
+    tenant_id: str,
+    limit: int = 50,
+    user: dict = Depends(get_current_user),
+):
+    """Return conversation history for the current user scoped to tenant_id."""
+    limit = min(limit, 200)
+    user_sub = user.get("sub", "")
+    conversations = get_conversations(tenant_id=tenant_id, user_sub=user_sub, limit=limit)
+    return {"conversations": conversations, "count": len(conversations)}
+
+
+@app.post("/history")
+def post_history(
+    body: SaveConversationRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Save a completed conversation turn."""
+    user_sub = user.get("sub", "")
+    conv_id = save_conversation(
+        tenant_id=body.tenant_id,
+        user_sub=user_sub,
+        query=body.query,
+        mode=body.mode,
+        response=body.response,
+        sql_generated=body.sql_generated,
+        row_count=body.row_count,
+    )
+    return {"id": conv_id}
 
 
 # ============================================

@@ -17,6 +17,7 @@ export const API_ENDPOINTS = {
   // App endpoints
   ask: `${API_BASE_URL}/ask`,
   askStream: `${API_BASE_URL}/ask/stream`,
+  history: `${API_BASE_URL}/history`,
   health: `${API_BASE_URL}/health`,
   dbPing: `${API_BASE_URL}/db-ping`,
   logs: `${API_BASE_URL}/logs`,
@@ -32,8 +33,7 @@ export const API_ENDPOINTS = {
   adminLogs: `${API_BASE_URL}/admin/logs`,
 } as const;
 
-// Default tenant ID (for development)
-// Use one of the allowed tenant IDs: c55b3c70-7aa7-11eb-a7e8-9b4baf296adf or eaeddcf1-fb98-11eb-94c9-b1e578657155
+// Default tenant ID — set VITE_DEFAULT_TENANT_ID in .env (fallback when Auth0 token has no tenant claim)
 export const DEFAULT_TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID;
 
 /**

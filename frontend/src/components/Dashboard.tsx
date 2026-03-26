@@ -63,6 +63,7 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
   ]);
   // Check admin status from backend /auth/me endpoint
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [historyLoaded, setHistoryLoaded] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -117,11 +118,82 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
     })();
   }, [getAccessToken]);
 
+  // Load conversation history on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const accessToken = await getAccessToken();
+        const tokenTenantId = user?.['https://api.sargon.com/tenant_id'];
+        const activeTenantId = tokenTenantId || DEFAULT_TENANT_ID || '';
+        if (!activeTenantId) return;
+
+        const res = await fetch(
+          `${API_ENDPOINTS.history}?tenant_id=${encodeURIComponent(activeTenantId)}&limit=50`,
+          { headers: getAuthHeadersWithToken(accessToken) }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (Array.isArray(data.conversations) && data.conversations.length > 0) {
+          const historical: Message[] = [];
+          for (const conv of data.conversations) {
+            // User message
+            historical.push({
+              id: `hist-user-${conv.id}`,
+              role: 'user',
+              content: conv.query,
+              timestamp: conv.created_at,
+            });
+            // Assistant message
+            historical.push({
+              id: `hist-asst-${conv.id}`,
+              role: 'assistant',
+              content: conv.response || '',
+              timestamp: conv.created_at,
+              sql: conv.sql_generated || undefined,
+              rowCount: conv.row_count ?? 0,
+            });
+          }
+          setMessages(historical);
+        }
+      } catch {
+        // History load failure is non-fatal — start with empty chat
+      } finally {
+        setHistoryLoaded(true);
+      }
+    })();
+  }, [getAccessToken, user]);
+
+  // Save a completed conversation to the backend
+  const saveConversation = useCallback(async (
+    query: string,
+    assistantMsg: Message,
+    tenantId: string,
+  ) => {
+    try {
+      const accessToken = await getAccessToken();
+      await fetch(API_ENDPOINTS.history, {
+        method: 'POST',
+        headers: getAuthHeadersWithToken(accessToken),
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          query,
+          mode: assistantMsg.sql ? 'sql' : 'chat',
+          response: assistantMsg.content,
+          sql_generated: assistantMsg.sql ?? null,
+          row_count: assistantMsg.rowCount ?? 0,
+        }),
+      });
+    } catch {
+      // Save failure is silent — chat still works
+    }
+  }, [getAccessToken]);
+
   /**
    * Handle streaming SSE response from /ask/stream endpoint.
    * Data is rendered progressively as it arrives.
    */
-  const handleStreamingSubmit = useCallback(async (query: string) => {
+  const handleStreamingSubmit = useCallback(async (query: string, tenantId: string) => {
     const assistantMsgId = (Date.now() + 1).toString();
 
     // Create initial assistant message in streaming state
@@ -268,6 +340,14 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
           }
         }
       }
+      // Save completed conversation to backend
+      setMessages(prev => {
+        const finalMsg = prev.find(m => m.id === assistantMsgId);
+        if (finalMsg && !finalMsg.error && tenantId) {
+          saveConversation(query, finalMsg, tenantId);
+        }
+        return prev;
+      });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
       setMessages(prev => prev.map(msg =>
@@ -276,7 +356,7 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
           : msg
       ));
     }
-  }, [getAccessToken]);
+  }, [getAccessToken, saveConversation]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -308,7 +388,9 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
     }
 
     // Use streaming endpoint
-    await handleStreamingSubmit(query);
+    const tokenTenantId = user?.['https://api.sargon.com/tenant_id'];
+    const activeTenantId = tokenTenantId || DEFAULT_TENANT_ID || '';
+    await handleStreamingSubmit(query, activeTenantId);
     setIsLoading(false);
   };
 

@@ -33,6 +33,7 @@ from app.metrics import (
     increment_clarification_count,
     record_query_execution_time,
     record_bedrock_call_time,
+    record_token_usage,
 )
 from app.safety.guardrails import SQLGuardrails
 from app.schema.context import SchemaContext
@@ -805,6 +806,14 @@ async def ask_stream(
                 increment_error_count("bedrock_streaming_error", tenant_id)
                 yield _sse_event("error", {"message": "Model did not return a valid response"})
                 return
+
+            usage = bedrock_result.get("usage", {})
+            if usage.get("input_tokens") or usage.get("output_tokens"):
+                record_token_usage(
+                    input_tokens=usage.get("input_tokens", 0),
+                    output_tokens=usage.get("output_tokens", 0),
+                    tenant_id=tenant_id,
+                )
 
             mode = bedrock_result.get("mode", "sql")
             response_text = bedrock_result.get("response")

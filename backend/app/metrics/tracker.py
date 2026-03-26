@@ -24,6 +24,8 @@ _total_errors = 0
 _total_sql_queries = 0
 _total_chat_responses = 0
 _total_clarification_responses = 0
+_total_input_tokens = 0
+_total_output_tokens = 0
 
 # Error tracking by type
 _error_counts: Dict[str, int] = defaultdict(int)
@@ -35,6 +37,8 @@ _by_tenant: Dict[str, Dict[str, int]] = defaultdict(lambda: {
     "sql_queries": 0,
     "chat_responses": 0,
     "clarification_responses": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
 })
 _by_tenant_errors: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
@@ -135,6 +139,8 @@ def get_metrics_by_tenant(tenant_id: str) -> Dict[str, Any]:
         errors_by_type = dict(_by_tenant_errors.get(tenant_id, {}))
         requests = t.get("requests", 0)
         errors = t.get("errors", 0)
+        input_tokens = t.get("input_tokens", 0)
+        output_tokens = t.get("output_tokens", 0)
         return {
             "tenant_id": tenant_id,
             "requests": requests,
@@ -144,6 +150,9 @@ def get_metrics_by_tenant(tenant_id: str) -> Dict[str, Any]:
             "clarification_responses": t.get("clarification_responses", 0),
             "success_rate": round(((requests - errors) / requests * 100), 2) if requests > 0 else 0,
             "errors_by_type": errors_by_type,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
         }
 
 
@@ -165,6 +174,17 @@ def record_bedrock_call_time(call_time_ms: float) -> None:
     with _metrics_lock:
         _bedrock_call_times.append(call_time_ms)
         _cleanup_old_data()
+
+
+def record_token_usage(input_tokens: int, output_tokens: int, tenant_id: Optional[str] = None) -> None:
+    """Record token usage from a Bedrock call."""
+    global _total_input_tokens, _total_output_tokens
+    with _metrics_lock:
+        _total_input_tokens += input_tokens
+        _total_output_tokens += output_tokens
+        if tenant_id:
+            _by_tenant[tenant_id]["input_tokens"] = _by_tenant[tenant_id].get("input_tokens", 0) + input_tokens
+            _by_tenant[tenant_id]["output_tokens"] = _by_tenant[tenant_id].get("output_tokens", 0) + output_tokens
 
 
 def get_metrics() -> Dict[str, Any]:
@@ -231,6 +251,9 @@ def get_metrics() -> Dict[str, Any]:
                 "total_clarification_responses": _total_clarification_responses,
                 "success_rate": round(success_rate, 2),
                 "uptime_hours": round(uptime_hours, 2),
+                "total_input_tokens": _total_input_tokens,
+                "total_output_tokens": _total_output_tokens,
+                "total_tokens": _total_input_tokens + _total_output_tokens,
             },
             "errors": {
                 "by_type": dict(_error_counts),

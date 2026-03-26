@@ -20,15 +20,15 @@ _CONFIG_PATH = _CONFIG_DIR / "admin_config.json"
 
 def _default_allowed_tenant_ids() -> list[str]:
     """
-    Read allowed tenant IDs from ALLOWED_TENANT_IDS env var first.
-    Falls back to admin_config.json, then to an empty list.
-    Tenant IDs should never be hardcoded in source.
+    Read allowed tenant IDs from ALLOWED_TENANT_IDS env var.
+    Always includes DEFAULT_TENANT_ID so local dev works without
+    manually adding it to ALLOWED_TENANT_IDS.
     """
     from app.config import settings  # local import to avoid circular dependency
-    ids = settings.allowed_tenant_ids
-    if ids:
-        return ids
-    return []
+    ids = list(settings.allowed_tenant_ids or [])
+    if settings.default_tenant_id and settings.default_tenant_id not in ids:
+        ids.append(settings.default_tenant_id)
+    return ids
 
 
 # Default guardrails (match current SQLGuardrails)

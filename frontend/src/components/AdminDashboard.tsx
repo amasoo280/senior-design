@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   X,
   RefreshCw,
@@ -64,7 +64,7 @@ Decide how to respond:
 - If the user question is unclear or missing key details, ask a follow-up clarification question.
 - If the user clearly wants data, generate a SQL query that follows the rules above.`;
 
-export default function AdminDashboard({ onClose, getAccessToken, user }: AdminDashboardProps) {
+export default function AdminDashboard({ onClose, getAccessToken }: AdminDashboardProps) {
   const [activeSection, setActiveSection] = useState<Section>('totals');
   const [totals, setTotals] = useState<{
     total_requests: number;
@@ -77,12 +77,6 @@ export default function AdminDashboard({ onClose, getAccessToken, user }: AdminD
   const [selectedTenantId, setSelectedTenantId] = useState<string>('');
   const [accountMetrics, setAccountMetrics] = useState<Record<string, unknown> | null>(null);
   const [accountLogs, setAccountLogs] = useState<Array<{ timestamp: string; level: string; message: string; tenant_id: string }>>([]);
-  const [guardrails, setGuardrails] = useState<{
-    allowed_tenant_ids: string[];
-    dangerous_keywords: string[];
-    sql_injection_patterns: string[];
-    tenant_column: string;
-  } | null>(null);
   const [promptTemplate, setPromptTemplate] = useState<string>('');
   const [dbContext, setDbContext] = useState<string>('');
   const [sampleQuestions, setSampleQuestions] = useState<string[]>([
@@ -172,7 +166,7 @@ export default function AdminDashboard({ onClose, getAccessToken, user }: AdminD
   const loadGuardrails = useCallback(async () => {
     try {
       const data = await fetchWithAuth(API_ENDPOINTS.adminConfigGuardrails);
-      setGuardrails(data);
+      void data; // guardrails are view-only; kept for future use
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load guardrails');
     }
@@ -255,13 +249,6 @@ export default function AdminDashboard({ onClose, getAccessToken, user }: AdminD
       return () => clearInterval(interval);
     }
   }, [activeSection, autoRefresh, loadAnalytics]);
-
-  // Guardrails are safety-critical (tenant isolation, dangerous SQL keywords, accountId column).
-  // Per client request, these are view-only in the dashboard and can only be changed in code.
-  const handleSaveGuardrails = async () => {
-    // No-op on purpose; leaving here in case we add limited, safe edits later.
-    return;
-  };
 
   const handleSavePrompt = async () => {
     setSaving('prompt');

@@ -8,7 +8,6 @@ import {
 import { API_ENDPOINTS, DEFAULT_TENANT_ID, SHOW_SQL_UI } from '../config';
 import { getAuthHeadersWithToken } from '../utils/auth';
 import LogsViewer from './LogsViewer';
-import AdminDashboard from './AdminDashboard';
 
 interface ValidationInfo {
   status: 'valid' | 'partial' | 'mismatch' | 'skipped' | 'pending' | 'unknown';
@@ -49,6 +48,7 @@ interface ChatSession {
   created_at: string;
   updated_at: string;
   message_count: number;
+}
 
 interface DashboardProps {
   getAccessToken: () => Promise<string>;
@@ -159,6 +159,8 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
           content: conv.query,
           timestamp: conv.created_at,
         });
+        const restoredData = conv.result_data ? (() => { try { return JSON.parse(conv.result_data); } catch { return []; } })() : [];
+        const restoredChart = conv.chart_data ? (() => { try { return JSON.parse(conv.chart_data); } catch { return undefined; } })() : undefined;
         historical.push({
           id: `hist-asst-${conv.id}`,
           role: 'assistant',
@@ -166,6 +168,9 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
           timestamp: conv.created_at,
           sql: conv.sql_generated || undefined,
           rowCount: conv.row_count ?? 0,
+          data: restoredData,
+          columns: restoredData.length > 0 && typeof restoredData[0] === 'object' && restoredData[0] !== null ? Object.keys(restoredData[0]) : [],
+          chart: restoredChart,
         });
       }
       setMessages(historical);
@@ -241,6 +246,12 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
           response: assistantMsg.content,
           sql_generated: assistantMsg.sql ?? null,
           row_count: assistantMsg.rowCount ?? 0,
+          result_data: assistantMsg.data?.length
+            ? JSON.stringify(assistantMsg.data.slice(0, 200))
+            : null,
+          chart_data: assistantMsg.chart
+            ? JSON.stringify(assistantMsg.chart)
+            : null,
         }),
       });
       // Bump session to top of list
@@ -330,7 +341,7 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
                   break;
 
                 case 'chart':
-                  updated.chart = data.chart;
+                  u.chart = data.chart;
                   break;
 
                 case 'done':
@@ -345,7 +356,7 @@ const Dashboard: React.FC<DashboardProps> = ({ getAccessToken, user, onLogout, o
                   u.rowCount = data.row_count ?? u.data?.length ?? 0;
                   if (data.mode !== 'sql' && data.message) {
                     u.content = data.message;
-                  } else if (u.rowCount > 0) {
+                  } else if ((u.rowCount ?? 0) > 0) {
                     u.content = `Found ${u.rowCount} result${u.rowCount === 1 ? '' : 's'}.`;
                   } else if (u.rowCount === 0 && data.mode === 'sql') {
                     u.content = 'The query executed successfully but returned no results.';

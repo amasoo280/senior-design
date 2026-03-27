@@ -411,6 +411,8 @@ class SaveConversationRequest(BaseModel):
     response: Optional[str] = None
     sql_generated: Optional[str] = None
     row_count: int = 0
+    result_data: Optional[str] = None   # JSON-encoded rows (max 200)
+    chart_data: Optional[str] = None    # JSON-encoded chart payload
 
 
 class UpdateSessionTitleRequest(BaseModel):
@@ -498,6 +500,8 @@ def post_history(body: SaveConversationRequest, user: dict = Depends(get_current
         response=body.response,
         sql_generated=body.sql_generated,
         row_count=body.row_count,
+        result_data=body.result_data,
+        chart_data=body.chart_data,
     )
     return {"id": conv_id}
 

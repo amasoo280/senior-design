@@ -46,8 +46,8 @@ class SchemaContext:
 
     def _get_default_schema(self) -> Dict:
         """
-        Schema aligned exactly with the production EER diagram.
-        Only customer-relevant tables are included.
+        Schema aligned exactly with the production database.
+        Sensitive columns (passwords, pins, auth IDs, UUIDs) are excluded.
         """
         return {
             "tables": [
@@ -58,48 +58,95 @@ class SchemaContext:
                 {
                     "name": "TAG",
                     "columns": [
-                        "cloudUUID VARCHAR(40) PRIMARY KEY  -- internal ID, do NOT display to users",
-                        "accountId VARCHAR(40)  -- internal, do NOT display to users",
+                        "cloudUUID VARCHAR(40) PRIMARY KEY  -- internal ID, do NOT display",
+                        "accountId VARCHAR(40)  -- internal, do NOT display",
                         "description TEXT  -- user-facing asset description",
-                        "serialNumber TEXT  -- user-facing asset identifier, alias as asset_number",
-                        "type TEXT",
-                        "isDeleted TINYINT",
-                        "latestLocationName TEXT",
-                        "latestLocationUUID VARCHAR(40)  -- internal, use for JOINs only",
-                        "latestLocationTimestamp BIGINT",
+                        "serialNumber TEXT  -- asset serial number, alias as asset_number",
+                        "assetNumber VARCHAR(512)  -- alternate asset identifier",
+                        "rfid VARCHAR(32)  -- RFID tag number",
+                        "barcode TEXT",
+                        "type TEXT  -- equipment category",
+                        "make TEXT",
+                        "model TEXT",
+                        "year TEXT",
+                        "manufacturer TEXT",
+                        "engineModel TEXT",
+                        "vinNumber TEXT",
+                        "licenseNumber TEXT",
+                        "cost TEXT",
+                        "rentalCost TEXT  -- rental cost per day",
+                        "rentalCostTwo TEXT",
+                        "equipmentMonthlyCost TEXT",
+                        "equipmentMonthlyPayment TEXT",
+                        "equipmentAPR TEXT",
+                        "equipmentPayOffDate TEXT",
+                        "datePurchased TEXT",
+                        "purchasedDate TEXT",
+                        "purchasedFrom TEXT",
+                        "warrantyTerm TEXT",
+                        "expirationTimestamp BIGINT  -- expiration date (milliseconds)",
+                        "depreciationMethod TEXT",
+                        "hours INT  -- current hours on equipment",
+                        "baseHours INT",
+                        "miles INT  -- current mileage",
+                        "baseMiles INT",
+                        "location TEXT  -- assigned location label",
+                        "crew TEXT",
+                        "notes TEXT",
+                        "custom1 TEXT",
+                        "custom2 TEXT",
+                        "misc TEXT",
+                        "maintenanceScheduleName TEXT",
+                        "meterId TEXT",
+                        "latestLocationName TEXT  -- most recent location name",
+                        "latestLocationTimestamp BIGINT  -- milliseconds",
                         "latestLocationLatitude DOUBLE",
                         "latestLocationLongitude DOUBLE",
-                        "tagAddTimestamp BIGINT",
+                        "latestLocationUUID VARCHAR(40)  -- internal, use for JOINs only",
+                        "sublocation TEXT",
+                        "tagAddTimestamp BIGINT  -- when tag was added (milliseconds)",
                         "syncTimestamp BIGINT",
+                        "isDeleted TINYINT",
                     ],
                     "notes": [
-                        "Use serialNumber or description as the asset identifier in output",
-                        "cloudUUID is the internal unique identifier - DO NOT show in results",
-                        "latestLocationTimestamp represents the most recent known location (milliseconds)",
-                        "DO NOT use tagUUID (does not exist)",
+                        "Use serialNumber or description as the primary asset identifier in output",
+                        "latestLocationTimestamp is milliseconds since epoch",
+                        "DO NOT display cloudUUID, accountId, or any UUID column",
                     ],
                 },
 
                 # -------------------------------------------------
-                # EquipmentLocation
+                # EquipmentLocation  (jobs / dispatch jobs)
                 # -------------------------------------------------
                 {
                     "name": "EquipmentLocation",
                     "columns": [
                         "cloudUUID VARCHAR(40) PRIMARY KEY  -- internal ID, do NOT display",
                         "accountId VARCHAR(40)  -- internal, do NOT display",
-                        "employeeOpenUUID VARCHAR(40)",
-                        "employeeCloseUUID VARCHAR(40)",
                         "locationName TEXT",
-                        "locationType INT",
-                        "startTimestamp BIGINT",
-                        "endTimestamp BIGINT",
-                        "syncTimestamp BIGINT",
+                        "locationType INT  -- 0=Warehouse, 1=Truck, 2=Job",
+                        "startTimestamp BIGINT  -- milliseconds",
+                        "endTimestamp BIGINT  -- milliseconds, 0 if still open",
+                        "jobNumber VARCHAR(50)",
+                        "workOrderNumber VARCHAR(50)",
+                        "dispatchStreetAddress TEXT",
+                        "dispatchLatitude DOUBLE",
+                        "dispatchLongitude DOUBLE",
+                        "allocatedSignerName TEXT",
+                        "allocatedSignatureDate BIGINT  -- milliseconds",
+                        "pickedUpSignerName TEXT",
+                        "pickedUpSignatureDate BIGINT  -- milliseconds",
+                        "pastDueTime BIGINT  -- milliseconds",
+                        "hasPastDueReminder TINYINT  -- 0=no, 1=yes",
+                        "billed TINYINT  -- 0=no, 1=yes",
                         "notes TEXT",
+                        "syncTimestamp BIGINT",
+                        "isDeleted TINYINT",
                     ],
                     "notes": [
-                        "Represents the CURRENT location/state of equipment",
-                        "Use startTimestamp and endTimestamp for time-based queries",
+                        "locationType: 0=Warehouse, 1=Truck, 2=Job/dispatch",
+                        "endTimestamp=0 means the job is still open/active",
+                        "DO NOT display cloudUUID, accountId, employeeOpenUUID, employeeCloseUUID",
                     ],
                 },
 
@@ -111,18 +158,22 @@ class SchemaContext:
                     "columns": [
                         "cloudUUID VARCHAR(40)  -- internal ID, do NOT display",
                         "accountId VARCHAR(40)  -- internal, do NOT display",
+                        "tagUUID VARCHAR(40)  -- internal, use for JOINs only",
                         "locationUUID VARCHAR(40)  -- internal, use for JOINs only",
                         "locationName TEXT",
+                        "employeeName TEXT",
+                        "transferTime BIGINT  -- when transfer occurred (milliseconds)",
                         "syncTimestamp BIGINT",
-                        "transferUUID VARCHAR(40)",
-                        "scanType TINYINT",
+                        "scanType TINYINT  -- 0=RFID, 1=Barcode, 2=Manual",
                         "sublocation TEXT",
+                        "isDeleted SMALLINT",
                     ],
                     "notes": [
-                        "Historical movement records for equipment",
-                        "Use syncTimestamp for time filtering (milliseconds)",
-                        "DO NOT use scanTimestamp (does not exist)",
-                        "Common join: TAG.latestLocationUUID = EquipmentLocationHistory.locationUUID",
+                        "Historical movement log for each asset",
+                        "Use transferTime for chronological queries (milliseconds)",
+                        "scanType: 0=RFID, 1=Barcode, 2=Manual",
+                        "Join to TAG: TAG.latestLocationUUID = EquipmentLocationHistory.locationUUID",
+                        "DO NOT display cloudUUID, accountId, tagUUID, locationUUID, employeeUUID",
                     ],
                 },
 
@@ -133,18 +184,46 @@ class SchemaContext:
                     "name": "JOBINSTANCE",
                     "columns": [
                         "cloudUUID VARCHAR(40) PRIMARY KEY  -- internal ID, do NOT display",
-                        "jobUUID VARCHAR(40)",
+                        "jobUUID VARCHAR(40)  -- internal, use for JOINs only",
                         "jobName TEXT",
-                        "employeeUUID VARCHAR(40)",
-                        "jobStartTimestamp BIGINT",
-                        "jobCompleteTimestamp BIGINT",
+                        "jobScanTimestamp BIGINT  -- when job was run (milliseconds)",
+                        "jobComplete TINYINT(1)  -- 0=incomplete, 1=complete",
+                        "employeeName TEXT",
                         "syncTimestamp BIGINT",
-                        "isDeleted TINYINT",
+                        "isDeleted TINYINT(1)",
                         "accountId VARCHAR(40)  -- internal, do NOT display",
                     ],
                     "notes": [
-                        "Represents jobs assigned to employees",
-                        "Use jobCompleteTimestamp and syncTimestamp for time-based queries",
+                        "jobComplete is a flag (0/1), NOT a timestamp",
+                        "jobScanTimestamp is milliseconds since epoch",
+                        "DO NOT use jobStartTimestamp or jobCompleteTimestamp (do not exist)",
+                        "DO NOT display cloudUUID, accountId, jobUUID, employeeUUID",
+                    ],
+                },
+
+                # -------------------------------------------------
+                # TAGJOBINSTANCE  (which tags were in each job)
+                # -------------------------------------------------
+                {
+                    "name": "TAGJOBINSTANCE",
+                    "columns": [
+                        "cloudUUID VARCHAR(40) PRIMARY KEY  -- internal ID, do NOT display",
+                        "jobUUID VARCHAR(40)  -- internal, use to JOIN to JOBINSTANCE",
+                        "tagName TEXT  -- asset name/description",
+                        "tagRFID VARCHAR(32)  -- RFID of the tag",
+                        "detected TINYINT(1)  -- 0=not detected, 1=detected in job scan",
+                        "extraTag TINYINT(1)  -- 0=expected, 1=found in wrong job",
+                        "otherJobUUID VARCHAR(40)  -- internal, job this tag belongs to if extraTag=1",
+                        "scanType TINYINT",
+                        "syncTimestamp BIGINT",
+                        "accountId VARCHAR(40)  -- internal, do NOT display",
+                    ],
+                    "notes": [
+                        "Links assets (tags) to job scan instances",
+                        "detected=1 means the tag was successfully scanned in the job",
+                        "extraTag=1 means the tag was scanned but belongs to a different job",
+                        "Join to JOBINSTANCE: TAGJOBINSTANCE.jobUUID = JOBINSTANCE.jobUUID",
+                        "DO NOT display cloudUUID, accountId, jobUUID, otherJobUUID",
                     ],
                 },
 
@@ -155,21 +234,57 @@ class SchemaContext:
                     "name": "EMPLOYEE",
                     "columns": [
                         "cloudUUID VARCHAR(40) PRIMARY KEY  -- internal ID, do NOT display",
-                        "name TEXT",
-                        "login VARCHAR(128)",
-                        "deviceId VARCHAR(40)",
-                        "employeeLevel INT",
-                        "accountId VARCHAR(40)  -- internal, do NOT display",
+                        "name TEXT  -- employee full name",
+                        "companyId TEXT  -- employee company ID used for scanning",
+                        "employeeLevel INT  -- access level",
+                        "barCodeEnabled TINYINT(1)  -- 0=no, 1=yes",
+                        "manualScanEnabled TINYINT  -- 0=no, 1=yes",
                         "syncTimestamp BIGINT",
+                        "isDeleted TINYINT(1)",
+                        "accountId VARCHAR(40)  -- internal, do NOT display",
                     ],
                     "notes": [
-                        "Employee identity and login information",
-                        "DO NOT use company or pin unless explicitly joined elsewhere",
+                        "DO NOT display cloudUUID, accountId, login, password, pin, auth0UserId, deviceId",
                     ],
                 },
 
                 # -------------------------------------------------
-                # DATAEVENT
+                # SUBLOCATION
+                # -------------------------------------------------
+                {
+                    "name": "SUBLOCATION",
+                    "columns": [
+                        "cloudUUID VARCHAR(50)  -- internal ID, do NOT display",
+                        "accountId VARCHAR(50)  -- internal, do NOT display",
+                        "sublocation TEXT  -- sublocation name",
+                        "syncTimestamp BIGINT",
+                        "isDeleted TINYINT",
+                    ],
+                    "notes": [
+                        "List of defined sublocations within locations",
+                    ],
+                },
+
+                # -------------------------------------------------
+                # TYPE  (equipment categories)
+                # -------------------------------------------------
+                {
+                    "name": "TYPE",
+                    "columns": [
+                        "cloudUUID VARCHAR(40)  -- internal ID, do NOT display",
+                        "accountId VARCHAR(40)  -- internal, do NOT display",
+                        "name TEXT  -- equipment type/category name",
+                        "syncTimestamp BIGINT",
+                        "isDeleted TINYINT",
+                    ],
+                    "notes": [
+                        "Lookup table for equipment type/category names",
+                        "DO NOT display cloudUUID, accountId",
+                    ],
+                },
+
+                # -------------------------------------------------
+                # DATAEVENT  (audit log)
                 # -------------------------------------------------
                 {
                     "name": "DATAEVENT",
@@ -177,15 +292,16 @@ class SchemaContext:
                         "cloudUUID VARCHAR(40)  -- internal ID, do NOT display",
                         "accountId VARCHAR(40)  -- internal, do NOT display",
                         "eventType INT",
-                        "prevValue TEXT",
+                        "preValue TEXT",
                         "postValue TEXT",
-                        "eventTime BIGINT",
+                        "eventTime BIGINT  -- milliseconds",
                         "syncTimestamp BIGINT",
                         "user TEXT",
                     ],
                     "notes": [
-                        "Audit-style event records",
-                        "Use eventTime or syncTimestamp for time filtering",
+                        "Audit log of data changes",
+                        "Use eventTime for time filtering (milliseconds)",
+                        "DO NOT use prevValue (does not exist, correct column is preValue)",
                     ],
                 },
             ]

@@ -50,19 +50,24 @@ def init_conversations_table() -> None:
                 response      TEXT,
                 sql_generated TEXT,
                 row_count     INT          NOT NULL DEFAULT 0,
+                result_data   MEDIUMTEXT,
+                chart_data    TEXT,
                 created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 INDEX idx_conv_session (session_id),
                 INDEX idx_conv_tenant_user (tenant_id, user_sub)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """))
 
-        # Migration: add session_id column if upgrading from old schema (no-op if already present)
-        try:
-            conn.execute(text(
-                "ALTER TABLE conversations ADD COLUMN session_id VARCHAR(36) NOT NULL DEFAULT '' AFTER id"
-            ))
-        except Exception:
-            pass  # Column already exists
+        # Migrations: add columns if upgrading from older schema (no-op if already present)
+        for migration in [
+            "ALTER TABLE conversations ADD COLUMN session_id VARCHAR(36) NOT NULL DEFAULT '' AFTER id",
+            "ALTER TABLE conversations ADD COLUMN result_data MEDIUMTEXT AFTER row_count",
+            "ALTER TABLE conversations ADD COLUMN chart_data TEXT AFTER result_data",
+        ]:
+            try:
+                conn.execute(text(migration))
+            except Exception:
+                pass  # Column already exists
 
         conn.commit()
     logger.info("chat_sessions and conversations tables ready")
@@ -164,6 +169,8 @@ def save_conversation(
     response: Optional[str] = None,
     sql_generated: Optional[str] = None,
     row_count: int = 0,
+    result_data: Optional[str] = None,
+    chart_data: Optional[str] = None,
 ) -> str:
     """Persist one conversation turn and bump the session's updated_at."""
     conv_id = str(uuid.uuid4())
@@ -172,15 +179,18 @@ def save_conversation(
         conn.execute(
             text("""
                 INSERT INTO conversations
-                    (id, session_id, tenant_id, user_sub, query, mode, response, sql_generated, row_count, created_at)
+                    (id, session_id, tenant_id, user_sub, query, mode, response,
+                     sql_generated, row_count, result_data, chart_data, created_at)
                 VALUES
-                    (:id, :session_id, :tenant_id, :user_sub, :query, :mode, :response, :sql_generated, :row_count, :created_at)
+                    (:id, :session_id, :tenant_id, :user_sub, :query, :mode, :response,
+                     :sql_generated, :row_count, :result_data, :chart_data, :created_at)
             """),
             {
                 "id": conv_id, "session_id": session_id,
                 "tenant_id": tenant_id, "user_sub": user_sub,
                 "query": query, "mode": mode, "response": response,
                 "sql_generated": sql_generated, "row_count": row_count,
+                "result_data": result_data, "chart_data": chart_data,
                 "created_at": now,
             },
         )
@@ -203,7 +213,7 @@ def get_conversations(
         result = conn.execute(
             text("""
                 SELECT c.id, c.session_id, c.query, c.mode, c.response,
-                       c.sql_generated, c.row_count, c.created_at
+                       c.sql_generated, c.row_count, c.result_data, c.chart_data, c.created_at
                 FROM conversations c
                 JOIN chat_sessions s ON s.id = c.session_id
                 WHERE c.session_id = :session_id

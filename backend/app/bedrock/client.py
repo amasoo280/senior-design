@@ -158,6 +158,20 @@ class BedrockClient:
         # Enable extended thinking for supported Claude models.
         thinking_budget = min(max_tokens // 2 if max_tokens else 1024, 4000) or 1024
 
+        # Prompt caching (cache_control) is incompatible with extended thinking on Bedrock.
+        # Strip cache_control markers so thinking works correctly.
+        def _strip_cache_control(blocks):
+            return [{k: v for k, v in b.items() if k != "cache_control"} for b in blocks]
+
+        def _strip_cache_control_messages(msgs):
+            result = []
+            for msg in msgs:
+                content = msg.get("content", [])
+                if isinstance(content, list):
+                    msg = {**msg, "content": _strip_cache_control(content)}
+                result.append(msg)
+            return result
+
         body = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": max_tokens,
@@ -166,8 +180,8 @@ class BedrockClient:
                 "type": "enabled",
                 "budget_tokens": thinking_budget,
             },
-            "system": system_blocks,
-            "messages": messages,
+            "system": _strip_cache_control(system_blocks),
+            "messages": _strip_cache_control_messages(messages),
         }
 
         start_time = time.time()
